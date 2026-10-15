@@ -1,0 +1,38 @@
+#pragma once
+#include <optional>
+#include <string_view>
+
+enum class EventType
+{
+    CARD_INSERTED,
+    CARD_REJECTED,
+    AUTH_REQUESTED,
+    AUTH_RESULT,
+    DISPENSE_REQUESTED,
+    DISPENSE_COMPLETED,
+    DISPENSE_FAILED,
+    CARD_RETURNED,
+    CARD_RETAINED,
+    SESSION_ABORTED,
+    ILLEGAL_TRANSITION,
+    TAMPER_DETECTED,
+    STAFF_LOGIN,
+    STAFF_LOCKED,
+    ACCESS_DENIED,
+    DUAL_CONTROL_REQUESTED,
+    DUAL_CONTROL_APPROVED,
+    DUAL_CONTROL_EXECUTED,
+    KEY_UPDATED,
+    AUTH_DECISION,
+    NONCE_REPLAY,
+    COMMAND_ISSUED,
+    TX_COMMITTED,
+    TX_REVERSED,
+    TX_UNCERTAIN,
+    AUDIT_ACCESS,
+    LOG_STARTED,
+    LOG_INTEGRITY_FAILURE
+};
+
+const char* eventTypeToString(EventType t);
+std::optional<EventType> eventTypeFromString(std::string_view s);

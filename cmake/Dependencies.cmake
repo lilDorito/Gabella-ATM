@@ -1,0 +1,15 @@
+find_package(OpenSSL 3 REQUIRED)
+
+find_package(unofficial-sodium CONFIG QUIET)
+if(TARGET unofficial-sodium::sodium)
+    add_library(gabella_sodium INTERFACE)
+    target_link_libraries(gabella_sodium INTERFACE unofficial-sodium::sodium)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
+    add_library(gabella_sodium INTERFACE)
+    target_link_libraries(gabella_sodium INTERFACE PkgConfig::SODIUM)
+endif()
+add_library(Gabella::Sodium ALIAS gabella_sodium)
+
+find_package(SQLite3 REQUIRED)
