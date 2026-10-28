@@ -10,33 +10,64 @@
       "name": "debug",
       "inherits": "base",
       "displayName": "Debug (system libraries)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "OPENSSL_ROOT_DIR": "C:/Program Files/OpenSSL-Win64",
+        "CMAKE_PREFIX_PATH": "C:/vcpkg/installed/x64-windows",
+        "CMAKE_DISABLE_FIND_PACKAGE_unofficial-sodium": "ON",
+        "PKG_CONFIG_EXECUTABLE": "C:\\tools\\pkg-config\\pkg-config-lite-0.28-1\\bin\\pkg-config.exe",
+        "ENV_PKG_CONFIG_PATH": "C:/vcpkg/installed/x64-windows/lib/pkgconfig"
+      }
     },
     {
       "name": "release",
       "inherits": "base",
       "displayName": "Release (system libraries)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "OPENSSL_ROOT_DIR": "C:/Program Files/OpenSSL-Win64",
+        "PKG_CONFIG_EXECUTABLE": "C:/tools/pkg-config/bin/pkg-config.exe",
+        "CMAKE_PREFIX_PATH": "C:/vcpkg/installed/x64-windows",
+        "CMAKE_MAP_IMPORTED_CONFIG_DEBUG": "Release"
+      }
     },
     {
       "name": "sanitize",
       "inherits": "base",
       "displayName": "Debug + ASan/UBSan",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "GABELLA_SANITIZE": "ON" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "OPENSSL_ROOT_DIR": "C:/Program Files/OpenSSL-Win64",
+        "PKG_CONFIG_EXECUTABLE": "C:/tools/pkg-config/bin/pkg-config.exe",
+        "CMAKE_PREFIX_PATH": "C:/vcpkg/installed/x64-windows",
+        "CMAKE_MAP_IMPORTED_CONFIG_DEBUG": "Release"
+      }
     },
     {
       "name": "vcpkg-debug",
       "inherits": "base",
       "displayName": "Debug (vcpkg)",
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "OPENSSL_ROOT_DIR": "C:/Program Files/OpenSSL-Win64",
+        "PKG_CONFIG_EXECUTABLE": "C:/tools/pkg-config/bin/pkg-config.exe",
+        "CMAKE_PREFIX_PATH": "C:/vcpkg/installed/x64-windows",
+        "CMAKE_MAP_IMPORTED_CONFIG_DEBUG": "Release"
+      }
     },
     {
       "name": "vcpkg-release",
       "inherits": "base",
       "displayName": "Release (vcpkg)",
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "OPENSSL_ROOT_DIR": "C:/Program Files/OpenSSL-Win64",
+        "PKG_CONFIG_EXECUTABLE": "C:/tools/pkg-config/bin/pkg-config.exe",
+        "CMAKE_PREFIX_PATH": "C:/vcpkg/installed/x64-windows",
+        "CMAKE_MAP_IMPORTED_CONFIG_DEBUG": "Release"
+      }
     }
   ]
 }

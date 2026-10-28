@@ -19,3 +19,7 @@ endif()
 gabella_test(test_audit
     SOURCES audit/test_audit.cpp
     DEPS Gabella::common Gabella::crypto Gabella::audit Threads::Threads)
+
+gabella_test(test_atm
+    SOURCES atm/test_atm.cpp
+    DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::atm)

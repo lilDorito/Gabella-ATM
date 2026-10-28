@@ -45,7 +45,7 @@ endfunction()
 
 function(gabella_executable name)
     cmake_parse_arguments(EXE "" "" "SOURCES;DEPS" ${ARGN})
-    add_executable(${name} ${EXE_SOURCES})
+    add_executable(${name} ${EXE_SOURCES} "../tests/atm/FakeBank.h" "../tests/atm/FakeServerLink.h" "../tests/atm/test_atm.cpp")
     target_link_libraries(${name} PRIVATE ${EXE_DEPS})
     gabella_apply_warnings(${name})
 endfunction()
