@@ -23,3 +23,7 @@ gabella_test(test_audit
 gabella_test(test_atm
     SOURCES atm/test_atm.cpp
     DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::atm)
+
+gabella_test(test_access
+    SOURCES test_access.cpp
+    DEPS Gabella::common Gabella::audit Gabella::access)
