@@ -2,7 +2,8 @@
 
 const char* roleToString(Role r)
 {
-    switch (r) {
+    switch (r)
+    {
     case Role::Client: return "Client";
     case Role::ServiceEngineer: return "ServiceEngineer";
     case Role::CashCollector: return "CashCollector";
@@ -15,8 +16,7 @@ const char* roleToString(Role r)
 
 std::optional<Role> roleFromString(std::string_view s)
 {
-    for (Role r : { Role::Client, Role::ServiceEngineer, Role::CashCollector,
-                    Role::Auditor, Role::Admin, Role::System })
+    for (Role r : { Role::Client, Role::ServiceEngineer, Role::CashCollector, Role::Auditor, Role::Admin, Role::System })
     {
         if (s == roleToString(r)) return r;
     }

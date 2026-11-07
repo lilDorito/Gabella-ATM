@@ -26,7 +26,6 @@ public:
 
     [[nodiscard]] bool append(const std::string& line) override;
     std::vector<std::string> readAll() const override;
-
     bool isOpen() const;
     const std::filesystem::path& path() const { return _path; }
 };
@@ -40,7 +39,6 @@ private:
 public:
     [[nodiscard]] bool append(const std::string& line) override;
     std::vector<std::string> readAll() const override { return _lines; }
-
     void setFailAppends(bool fail) { _failAppends = fail; }
     std::vector<std::string>& lines() { return _lines; }
 };

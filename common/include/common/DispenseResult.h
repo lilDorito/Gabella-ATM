@@ -5,6 +5,7 @@ enum class DispenseResult
     Ok,
     InvalidSignature,
     WrongAtm,
+    Expired,
     ReplayedSequence,
     AmountNotDispensable,
     InsufficientCash,

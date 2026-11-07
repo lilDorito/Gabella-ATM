@@ -10,6 +10,7 @@ private:
 
 public:
     void onTamper(std::function<void()> handler) override { _handler = std::move(handler); }
+
     void trigger() override
     {
         if (_handler) _handler();

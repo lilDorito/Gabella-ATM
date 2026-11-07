@@ -30,9 +30,7 @@ private:
     std::string _atmId;
 
 public:
-    AttackScenarios(DispenserEmulator& dispenser, CardReaderEmulator& reader, std::string atmId)
-        : _dispenser(dispenser), _reader(reader), _atmId(std::move(atmId)) {
-    }
+    AttackScenarios(DispenserEmulator& dispenser, CardReaderEmulator& reader, std::string atmId) : _dispenser(dispenser), _reader(reader), _atmId(std::move(atmId)) {}
 
     AttackReport runJackpotting();
     AttackReport runSkimmer();

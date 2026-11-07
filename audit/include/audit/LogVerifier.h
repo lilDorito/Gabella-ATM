@@ -15,8 +15,7 @@ private:
     const IAuditSigner& _signer;
 
 public:
-    LogVerifier(const LogStorage& storage, const IAuditSigner& signer)
-        : _storage(storage), _signer(signer) {}
+    LogVerifier(const LogStorage& storage, const IAuditSigner& signer) : _storage(storage), _signer(signer) {}
 
     VerifyResult verifyChain() const;
     VerifyResult verifyAgainstCheckpoint(const Checkpoint& cp) const;

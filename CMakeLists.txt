@@ -20,6 +20,10 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Dependencies)
 include(GabellaModule)
 
+if(GABELLA_BUILD_TESTS)
+    add_compile_definitions(GABELLA_INVARIANT_THROW_ONLY)
+endif()
+
 add_subdirectory(common)
 add_subdirectory(server_api)
 add_subdirectory(crypto)

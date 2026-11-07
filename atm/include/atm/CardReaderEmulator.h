@@ -39,11 +39,9 @@ private:
 
 public:
     void insertCard(const std::string& pan, int expMonth, int expYear);
-
     std::optional<Card> readCard() override;
     bool eject() override;
     void retain() override { _status = Status::Retained; }
-
     Status status() const { return _status; }
     void setCardTakenOnEject(bool taken) { _takenOnEject = taken; }
     void attachSkimmer() { _skimmer = true; }

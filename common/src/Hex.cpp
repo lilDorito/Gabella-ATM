@@ -1,14 +1,13 @@
-#include "Hex.h"
+#include "common/Hex.h"
 
-namespace {
-
+namespace
+{
 int nibble(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     return -1;
 }
-
 }
 
 std::string toHex(const std::string& bytes)

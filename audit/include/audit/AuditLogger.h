@@ -34,13 +34,11 @@ private:
     ICheckpointSink& _sink;
     const IClock& _clock;
     const std::uint32_t _checkpointInterval;
-
     std::string _lastHash;
     std::uint64_t _lastSeqNo = 0;
     std::uint32_t _sinceCheckpoint = 0;
     LoggerState _state = LoggerState::Uninitialized;
     VerifyResult _startupCheck;
-
     mutable std::mutex _mtx;
 
     bool appendLocked(const LogEvent& e);
@@ -62,11 +60,8 @@ public:
     AuditLogger& operator=(AuditLogger&&) = delete;
 
     LoggerState init();
-
     [[nodiscard]] bool record(const LogEvent& e) override;
-
     [[nodiscard]] bool sealCheckpoint();
-
     LoggerState state() const;
     VerifyResult startupCheck() const;
     std::uint64_t lastSeqNo() const;

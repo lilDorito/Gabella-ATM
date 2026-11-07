@@ -1,42 +1,31 @@
 #include "audit/LogFormat.h"
 
 #include <charconv>
-#include <cstring>
 #include <vector>
 
-#include "Hex.h"
+#include "common/Hex.h"
 #include "crypto/CryptoCore.h"
 
-const char* const kLogFieldSeparator = "\xE2\x94\x82";
-const char* const kTornEntryMarker = "torn_entry";
+const char* const kLogFieldSeparator = "|";
+const char* const kTornEntryMarker = "reason=TornTail ";
 
-namespace {
-
-constexpr std::size_t kFieldCount = 12;
-
-std::size_t sepLen()
+namespace
 {
-    return std::strlen(kLogFieldSeparator);
-}
+constexpr std::size_t kFieldCount = 12;
 
 std::string escapeField(const std::string& in)
 {
-    const std::string sep = kLogFieldSeparator;
     std::string out;
     out.reserve(in.size());
-    for (std::size_t i = 0; i < in.size(); ++i)
+    for (char c : in)
     {
-        if (in.compare(i, sep.size(), sep) == 0)
+        switch (c)
         {
-            out += "\\s";
-            i += sep.size() - 1;
-            continue;
-        }
-        switch (in[i]) {
+        case '|': out += "\\s"; break;
         case '\\': out += "\\\\"; break;
         case '\n': out += "\\n"; break;
         case '\r': out += "\\r"; break;
-        default:   out.push_back(in[i]); break;
+        default: out.push_back(c); break;
         }
     }
     return out;
@@ -54,12 +43,13 @@ std::optional<std::string> unescapeField(const std::string& in)
             continue;
         }
         if (i + 1 >= in.size()) return std::nullopt;
-        switch (in[++i]) {
+        switch (in[++i])
+        {
         case '\\': out.push_back('\\'); break;
-        case 'n':  out.push_back('\n'); break;
-        case 'r':  out.push_back('\r'); break;
-        case 's':  out += kLogFieldSeparator; break;
-        default:   return std::nullopt;
+        case 'n': out.push_back('\n'); break;
+        case 'r': out.push_back('\r'); break;
+        case 's': out += kLogFieldSeparator; break;
+        default: return std::nullopt;
         }
     }
     return out;
@@ -94,7 +84,6 @@ std::optional<T> parseInt(const std::string& s)
     if (ec != std::errc() || ptr != last) return std::nullopt;
     return value;
 }
-
 }
 
 const std::string& genesisHash()
@@ -132,22 +121,17 @@ std::string serializeEntry(std::uint64_t seq, std::int64_t ts, const LogEvent& e
     return out;
 }
 
-std::string computeEntryHash(const std::string& prevHash, const std::string& canonical)
-{
-    return toHex(CryptoCore::sha256(prevHash + canonical));
-}
+std::string computeEntryHash(const std::string& prevHash, const std::string& canonical) { return toHex(CryptoCore::sha256(prevHash + canonical)); }
 
 std::string formatEntryLine(const LogEntry& entry)
 {
     const std::string sep = kLogFieldSeparator;
-    return serializeEntry(entry.getSeqNo(), entry.getTimestamp(), entry.getEvent())
-        + sep + entry.getPrevHash()
-        + sep + entry.getHash();
+    return serializeEntry(entry.getSeqNo(), entry.getTimestamp(), entry.getEvent()) + sep + entry.getPrevHash() + sep + entry.getHash();
 }
 
 std::optional<LogEntry> parseEntry(const std::string& line)
 {
-    if (line.empty() || sepLen() == 0) return std::nullopt;
+    if (line.empty()) return std::nullopt;
 
     std::vector<std::string> raw = splitFields(line);
     if (raw.size() != kFieldCount) return std::nullopt;

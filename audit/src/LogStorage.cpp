@@ -3,8 +3,8 @@
 #include <system_error>
 #include <utility>
 
-namespace {
-
+namespace
+{
 bool endsWithoutNewline(const std::filesystem::path& path)
 {
     std::error_code ec;
@@ -19,15 +19,12 @@ bool endsWithoutNewline(const std::filesystem::path& path)
     in.get(last);
     return last != '\n';
 }
-
 }
 
-FileLogStorage::FileLogStorage(std::filesystem::path path)
-    : _path(std::move(path))
+FileLogStorage::FileLogStorage(std::filesystem::path path) : _path(std::move(path))
 {
     std::error_code ec;
-    if (_path.has_parent_path())
-        std::filesystem::create_directories(_path.parent_path(), ec);
+    if (_path.has_parent_path()) std::filesystem::create_directories(_path.parent_path(), ec);
 
     bool needsNewline = endsWithoutNewline(_path);
     _out.open(_path, std::ios::app | std::ios::binary);
@@ -38,10 +35,7 @@ FileLogStorage::FileLogStorage(std::filesystem::path path)
     }
 }
 
-bool FileLogStorage::isOpen() const
-{
-    return _out.is_open() && _out.good();
-}
+bool FileLogStorage::isOpen() const { return _out.is_open() && _out.good(); }
 
 bool FileLogStorage::append(const std::string& line)
 {
@@ -61,8 +55,7 @@ std::vector<std::string> FileLogStorage::readAll() const
     if (!in) return lines;
 
     std::string line;
-    while (std::getline(in, line))
-        lines.push_back(line);
+    while (std::getline(in, line)) lines.push_back(line);
     return lines;
 }
 

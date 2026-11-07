@@ -24,8 +24,8 @@
 using gabella_test::check;
 using gabella_test::section;
 
-namespace {
-
+namespace
+{
 const std::string kPan = "5432101234567890";
 
 LogEvent sampleEvent(int i)
@@ -50,10 +50,7 @@ struct Rig
     AtmHsmAuditSigner signer;
     AuditLogger logger;
 
-    explicit Rig(const AtmHsm& hsm, std::uint32_t interval = AuditLogger::kDefaultCheckpointInterval)
-        : signer(hsm),
-        logger("ATM-001", storage, anchors, signer, sink, clock, interval)
-    {}
+    explicit Rig(const AtmHsm& hsm, std::uint32_t interval = AuditLogger::kDefaultCheckpointInterval) : signer(hsm), logger("ATM-001", storage, anchors, signer, sink, clock, interval) {}
 
     bool fill(int n, int offset = 0)
     {
@@ -76,12 +73,9 @@ std::string rewriteEntry(const std::string& line, std::int64_t newAmountKop, boo
     ev.amount = Money::fromKop(newAmountKop);
 
     std::string hash = entry->getHash();
-    if (recomputeHash)
-        hash = computeEntryHash(entry->getPrevHash(),
-            serializeEntry(entry->getSeqNo(), entry->getTimestamp(), ev));
+    if (recomputeHash) hash = computeEntryHash(entry->getPrevHash(), serializeEntry(entry->getSeqNo(), entry->getTimestamp(), ev));
 
-    return formatEntryLine(LogEntry(entry->getSeqNo(), entry->getTimestamp(), ev,
-        entry->getPrevHash(), hash));
+    return formatEntryLine(LogEntry(entry->getSeqNo(), entry->getTimestamp(), ev, entry->getPrevHash(), hash));
 }
 
 std::filesystem::path makeTempDir()
@@ -122,18 +116,15 @@ void testFormat()
         const LogEvent& b = back->getEvent();
         check(back->getSeqNo() == 42 && back->getTimestamp() == 1700000042, "U26: seq and timestamp preserved");
         check(b.details == e.details, "U26: details with separator, backslash, newline preserved");
-        check(b.type == e.type && b.outcome == e.outcome && b.actorRole == e.actorRole,
-            "U26: enums preserved");
-        check(b.sessionId == e.sessionId && b.actorId == e.actorId && b.maskedPan == e.maskedPan,
-            "U26: string fields preserved");
+        check(b.type == e.type && b.outcome == e.outcome && b.actorRole == e.actorRole, "U26: enums preserved");
+        check(b.sessionId == e.sessionId && b.actorId == e.actorId && b.maskedPan == e.maskedPan, "U26: string fields preserved");
         check(b.amount.has_value() && b.amount->kop() == 50000, "U26: amount preserved");
         check(back->getPrevHash() == genesisHash() && back->getHash() == hash, "U26: hashes preserved");
     }
 
     LogEvent noAmount;
     noAmount.type = EventType::LOG_STARTED;
-    auto na = parseEntry(formatEntryLine(LogEntry(1, 0, noAmount, genesisHash(),
-        computeEntryHash(genesisHash(), serializeEntry(1, 0, noAmount)))));
+    auto na = parseEntry(formatEntryLine(LogEntry(1, 0, noAmount, genesisHash(), computeEntryHash(genesisHash(), serializeEntry(1, 0, noAmount)))));
     check(na.has_value() && !na->getEvent().amount.has_value(), "empty amount roundtrips as nullopt");
 
     check(!parseEntry("0" + line).has_value(), "non-canonical number rejected");
@@ -198,48 +189,41 @@ void testChain(HsmFixture& fx)
 
     check(rig.sink.items().size() == 2, "checkpoint every 50 entries (50 and 100)");
     Checkpoint cp = rig.sink.items().back();
-    check(cp.seqNo == 100 && cp.hash == rig.logger.lastHash() && cp.logId == "ATM-001",
-        "checkpoint carries log id, last seq and hash");
+    check(cp.seqNo == 100 && cp.hash == rig.logger.lastHash() && cp.logId == "ATM-001", "checkpoint carries log id, last seq and hash");
     auto anchor = rig.anchors.load();
     check(anchor && anchor->seqNo == 100 && anchor->mac == cp.mac, "local anchor updated with checkpoint");
     check(verifier.verifyAgainstCheckpoint(cp).ok, "intact log matches its checkpoint");
 
     auto range = verifier.readEntries(10, 12);
-    check(range.size() == 3 && range.front().getSeqNo() == 10 && range.back().getSeqNo() == 12,
-        "readEntries returns requested range");
+    check(range.size() == 3 && range.front().getSeqNo() == 10 && range.back().getSeqNo() == 12, "readEntries returns requested range");
 
     const std::vector<std::string> pristine = rig.storage.lines();
 
     rig.storage.lines()[41] = rewriteEntry(pristine[41], 99900, false);
     r = verifier.verifyChain();
-    check(!r.ok && r.reason == VerifyError::HashMismatch && r.firstBadSeq == 42u,
-        "U22: altered amount in entry 42 -> HashMismatch at 42");
+    check(!r.ok && r.reason == VerifyError::HashMismatch && r.firstBadSeq == 42u, "U22: altered amount in entry 42 -> HashMismatch at 42");
 
     rig.storage.lines() = pristine;
     rig.storage.lines()[41] = rewriteEntry(pristine[41], 99900, true);
     r = verifier.verifyChain();
-    check(!r.ok && r.reason == VerifyError::ChainBroken && r.firstBadSeq == 43u,
-        "altered entry 42 with recomputed hash -> chain breaks at 43");
+    check(!r.ok && r.reason == VerifyError::ChainBroken && r.firstBadSeq == 43u, "altered entry 42 with recomputed hash -> chain breaks at 43");
 
     rig.storage.lines() = pristine;
     rig.storage.lines().erase(rig.storage.lines().begin() + 49);
     r = verifier.verifyChain();
-    check(!r.ok && r.reason == VerifyError::SeqGap && r.firstBadSeq == 50u,
-        "U23: deleted entry 50 -> SeqGap at 50");
+    check(!r.ok && r.reason == VerifyError::SeqGap && r.firstBadSeq == 50u, "U23: deleted entry 50 -> SeqGap at 50");
 
     rig.storage.lines() = pristine;
     std::swap(rig.storage.lines()[20], rig.storage.lines()[21]);
     r = verifier.verifyChain();
-    check(!r.ok && r.reason == VerifyError::SeqGap && r.firstBadSeq == 21u,
-        "swapped entries 21/22 -> SeqGap at 21");
+    check(!r.ok && r.reason == VerifyError::SeqGap && r.firstBadSeq == 21u, "swapped entries 21/22 -> SeqGap at 21");
 
     rig.storage.lines() = pristine;
     rig.storage.lines().resize(90);
     r = verifier.verifyChain();
     VerifyResult rc = verifier.verifyAgainstCheckpoint(cp);
     check(r.ok, "U24: truncated log still has a valid chain");
-    check(!rc.ok && rc.reason == VerifyError::CheckpointMissingEntry,
-        "U24: truncation detected by checkpoint (CheckpointMissingEntry)");
+    check(!rc.ok && rc.reason == VerifyError::CheckpointMissingEntry, "U24: truncation detected by checkpoint (CheckpointMissingEntry)");
 
     Rig forger(*fx.atm);
     forger.logger.init();
@@ -254,8 +238,7 @@ void testChain(HsmFixture& fx)
     r = verifier.verifyChain();
     rc = verifier.verifyAgainstCheckpoint(cp);
     check(r.ok, "U25: fully rewritten log has a valid chain");
-    check(!rc.ok && rc.reason == VerifyError::CheckpointHashMismatch,
-        "U25: full rewrite detected by checkpoint (CheckpointHashMismatch)");
+    check(!rc.ok && rc.reason == VerifyError::CheckpointHashMismatch, "U25: full rewrite detected by checkpoint (CheckpointHashMismatch)");
 
     rig.storage.lines() = pristine;
     Checkpoint forged = cp;
@@ -290,8 +273,7 @@ void testFailures(HsmFixture& fx)
 
         rig.storage.setFailAppends(true);
         check(!rig.logger.record(sampleEvent(100)), "U27: record returns false on storage failure");
-        check(rig.logger.lastSeqNo() == seq && rig.logger.lastHash() == hash,
-            "U27: sequence and hash in memory unchanged");
+        check(rig.logger.lastSeqNo() == seq && rig.logger.lastHash() == hash, "U27: sequence and hash in memory unchanged");
         check(rig.logger.state() == LoggerState::Failed, "logger moves to Failed");
 
         rig.storage.setFailAppends(false);
@@ -349,8 +331,7 @@ void testInit(HsmFixture& fx)
         check(restarted.startupCheck().reason == VerifyError::TornTail, "startup check reports TornTail");
 
         auto entries = LogVerifier(rig.storage, rig.signer).readEntries(12, 12);
-        check(entries.size() == 1 && entries[0].getEvent().type == EventType::LOG_INTEGRITY_FAILURE,
-            "torn line is recorded by LOG_INTEGRITY_FAILURE");
+        check(entries.size() == 1 && entries[0].getEvent().type == EventType::LOG_INTEGRITY_FAILURE, "torn line is recorded by LOG_INTEGRITY_FAILURE");
 
         VerifyResult r = LogVerifier(rig.storage, rig.signer).verifyChain();
         check(r.ok && r.recoveredTornEntries == 1, "chain valid with one documented torn entry");
@@ -363,8 +344,7 @@ void testInit(HsmFixture& fx)
         rig.fill(10);
         rig.storage.lines().insert(rig.storage.lines().begin() + 5, "junk");
         VerifyResult r = LogVerifier(rig.storage, rig.signer).verifyChain();
-        check(!r.ok && r.reason == VerifyError::MalformedEntry && r.firstBadSeq == 6u,
-            "junk line in the middle -> MalformedEntry");
+        check(!r.ok && r.reason == VerifyError::MalformedEntry && r.firstBadSeq == 6u, "junk line in the middle -> MalformedEntry");
     }
 
     {
@@ -381,10 +361,8 @@ void testInit(HsmFixture& fx)
         check(!r.ok && r.firstBadSeq == 5u, "original damage still reported, not hidden");
 
         auto entries = LogVerifier(rig.storage, rig.signer).readEntries(12, 12);
-        check(entries.size() == 1
-            && entries[0].getEvent().type == EventType::LOG_INTEGRITY_FAILURE
-            && entries[0].getEvent().details.find("HashMismatch") != std::string::npos,
-            "LOG_INTEGRITY_FAILURE names the damage");
+        const bool namesDamage = entries.size() == 1 && entries[0].getEvent().type == EventType::LOG_INTEGRITY_FAILURE && entries[0].getEvent().details.find("HashMismatch") != std::string::npos;
+        check(namesDamage, "LOG_INTEGRITY_FAILURE names the damage");
     }
 
     {
@@ -396,8 +374,7 @@ void testInit(HsmFixture& fx)
 
         AuditLogger restarted("ATM-001", rig.storage, rig.anchors, rig.signer, rig.sink, rig.clock);
         check(restarted.init() == LoggerState::Compromised, "truncation below local anchor -> Compromised");
-        check(restarted.startupCheck().reason == VerifyError::CheckpointMissingEntry,
-            "startup check reports CheckpointMissingEntry");
+        check(restarted.startupCheck().reason == VerifyError::CheckpointMissingEntry, "startup check reports CheckpointMissingEntry");
     }
 }
 
@@ -426,8 +403,7 @@ void testHsmIntegration(HsmFixture& fx)
     AuditLogger serverLog("SERVER", serverStorage, serverAnchors, bankSigner, serverSink, clock, 5);
     check(serverLog.init() == LoggerState::Ready, "server logger uses BankHsm signer");
     for (int i = 0; i < 4; ++i) (void)serverLog.record(sampleEvent(i));
-    check(serverSink.items().size() == 1 && verifyCheckpointMac(serverSink.items()[0], bankSigner),
-        "server checkpoints MACed by BankHsm");
+    check(serverSink.items().size() == 1 && verifyCheckpointMac(serverSink.items()[0], bankSigner), "server checkpoints MACed by BankHsm");
 
     HsmFixture tamperFx;
     Rig tamperRig(*tamperFx.atm);
@@ -465,8 +441,7 @@ void testFiles(HsmFixture& fx)
     {
         FileAnchorStore anchors(anchorPath);
         auto cp = anchors.load();
-        check(cp && cp->seqNo == 6 && cp->logId == "ATM-001" && cp->mac.size() == 32,
-            "anchor file roundtrip");
+        check(cp && cp->seqNo == 6 && cp->logId == "ATM-001" && cp->mac.size() == 32, "anchor file roundtrip");
     }
 
     {
@@ -502,7 +477,8 @@ void testConcurrency(HsmFixture& fx)
 
     Rig rig(*fx.atm);
     rig.logger.init();
-    auto worker = [&rig](int base) {
+    auto worker = [&rig](int base)
+    {
         for (int i = 0; i < 200; ++i) (void)rig.logger.record(sampleEvent(base + i));
     };
     std::thread a(worker, 0);
@@ -513,17 +489,15 @@ void testConcurrency(HsmFixture& fx)
     VerifyResult r = LogVerifier(rig.storage, rig.signer).verifyChain();
     check(r.ok && r.entryCount == 401, "two threads x 200 records -> valid chain of 401");
 }
-
 }
 
 int main()
 {
-    std::cout << "Module 3 test suite\n";
-    std::cout << "===================\n";
+    gabella_test::banner("Audit test suite");
 
     if (!CryptoCore::init())
     {
-        std::cerr << "FATAL: libsodium initialization failed\n";
+        std::cerr << "fatal: libsodium initialization failed\n";
         return 1;
     }
 

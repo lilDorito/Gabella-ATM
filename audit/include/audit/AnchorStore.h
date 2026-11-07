@@ -33,7 +33,6 @@ private:
 public:
     [[nodiscard]] bool save(const Checkpoint& cp) override;
     std::optional<Checkpoint> load() const override { return _cp; }
-
     void setFailSaves(bool fail) { _failSaves = fail; }
     void clear() { _cp.reset(); }
 };

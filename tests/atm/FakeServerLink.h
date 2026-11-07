@@ -14,16 +14,17 @@ private:
 
 public:
     bool online = true;
+    bool statusAccepted = true;
     std::function<void()> beforeReply;
     std::function<void(AuthResponse&)> alterInTransit;
     std::optional<Checkpoint> checkpoint;
-
     std::vector<SignedCommand> queuedCommands;
     std::vector<DispenseReport> reports;
     std::vector<StatusReport> statusReports;
     std::vector<std::string> endedSessions;
     std::vector<std::string> loggedOut;
     std::vector<std::pair<std::uint64_t, bool>> commandResults;
+    std::vector<StaffLoginRequest> loginRequests;
     bool tamperReported = false;
 
     FakeServerLink(FakeBank& bank, const AtmHsm& atmHsm) : _bank(bank), _atmHsm(atmHsm) {}
@@ -36,8 +37,7 @@ public:
         if (beforeReply) beforeReply();
         if (alterInTransit) alterInTransit(resp);
 
-        if (!_atmHsm.verifyServer(SignDomain::Response, responsePayload(resp), resp.signature))
-            return std::nullopt;
+        if (!_atmHsm.verifyServer(SignDomain::Response, resp.signedPayload(), resp.signature)) return std::nullopt;
         return resp;
     }
 
@@ -56,29 +56,25 @@ public:
         return out;
     }
 
-    void reportCommandResult(std::uint64_t commandSeq, bool ok) override
-    {
-        commandResults.emplace_back(commandSeq, ok);
-    }
+    void reportCommandResult(std::uint64_t commandSeq, bool ok) override { commandResults.emplace_back(commandSeq, ok); }
 
     bool syncStatus(const StatusReport& report) override
     {
+        if (!online || !statusAccepted) return false;
         statusReports.push_back(report);
         return true;
     }
 
     void endSession(const std::string& sessionId) override { endedSessions.push_back(sessionId); }
 
-    std::optional<StaffLoginResult> staffLogin(const std::string& staffId,
-        const std::string& sealedPassword) override
+    std::optional<StaffLoginResult> staffLogin(const StaffLoginRequest& request) override
     {
         if (!online) return std::nullopt;
-        return _bank.staffLogin(staffId, sealedPassword);
+        loginRequests.push_back(request);
+        return _bank.staffLogin(request);
     }
 
     void staffLogout(const std::string& token) override { loggedOut.push_back(token); }
-
     void reportTamper() override { tamperReported = true; }
-
     std::optional<Checkpoint> latestCheckpoint() override { return checkpoint; }
 };

@@ -2,7 +2,8 @@
 
 const char* eventTypeToString(EventType t)
 {
-    switch (t) {
+    switch (t)
+    {
     case EventType::CARD_INSERTED: return "CARD_INSERTED";
     case EventType::CARD_REJECTED: return "CARD_REJECTED";
     case EventType::AUTH_REQUESTED: return "AUTH_REQUESTED";
@@ -29,7 +30,7 @@ const char* eventTypeToString(EventType t)
     case EventType::TX_REVERSED: return "TX_REVERSED";
     case EventType::TX_UNCERTAIN: return "TX_UNCERTAIN";
     case EventType::AUDIT_ACCESS: return "AUDIT_ACCESS";
-    case EventType::LOG_STARTED:  return "LOG_STARTED";
+    case EventType::LOG_STARTED: return "LOG_STARTED";
     case EventType::LOG_INTEGRITY_FAILURE: return "LOG_INTEGRITY_FAILURE";
     }
     return "";

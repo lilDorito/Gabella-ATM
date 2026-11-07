@@ -2,8 +2,8 @@
 
 #include "common/PanMask.h"
 
-namespace {
-
+namespace
+{
 constexpr std::size_t kMaxDigitRun = 12;
 
 bool hasLongDigitRun(const std::string& s)
@@ -16,7 +16,6 @@ bool hasLongDigitRun(const std::string& s)
     }
     return false;
 }
-
 }
 
 bool isLoggable(const LogEvent& e)

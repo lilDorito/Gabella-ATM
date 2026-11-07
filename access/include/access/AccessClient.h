@@ -3,7 +3,7 @@
 
 #include "access/IAccessDecider.h"
 #include "access/PermissionTable.h"
-#include "atm/IAccessClient.h"
+#include "access/IAccessClient.h"
 
 class AccessClient final : public IAccessClient
 {
@@ -16,6 +16,5 @@ public:
     AccessClient(IAccessDecider& server, std::string atmId);
 
     [[nodiscard]] bool isAllowed(const std::string& staffToken, Action action) override;
-
     bool isVisible(Role role, Action action) const override;
 };

@@ -15,9 +15,10 @@
 #include "crypto/AtmHsm.h"
 #include "crypto/BankHsm.h"
 #include "crypto/CryptoCore.h"
+#include "crypto/KeyWrap.h"
 
-namespace {
-
+namespace
+{
 const std::string kMasterKey = "0123456789ABCDEF";
 const std::string kEncKey = "FEDCBA9876543210";
 const std::string kMacKey = "1111222233334444";
@@ -34,11 +35,9 @@ std::array<unsigned char, 32> demoSeed(char fill)
 bool bringUp(AtmHsm& atm)
 {
     if (!atm.installMasterKey(kMasterKey)) return false;
-    for (auto [type, key] : { std::pair{ KeyType::Encryption, kEncKey },
-                              std::pair{ KeyType::Mac, kMacKey },
-                              std::pair{ KeyType::Audit, kAuditKey } })
+    for (const auto& [type, key] : { std::pair{ KeyType::Encryption, kEncKey }, std::pair{ KeyType::Mac, kMacKey }, std::pair{ KeyType::Audit, kAuditKey } })
     {
-        auto blob = CryptoCore::aesCbcEncrypt(kMasterKey, key);
+        auto blob = wrapWorkingKey(kMasterKey, type, key);
         if (!blob || !atm.updateWorkingKey(type, *blob)) return false;
     }
     return atm.state() == AtmHsmState::Operational;
@@ -47,11 +46,8 @@ bool bringUp(AtmHsm& atm)
 void report(const std::string& name, const AuditLogger& log, const LogVerifier& verifier)
 {
     VerifyResult r = verifier.verifyChain();
-    std::cout << name << ": state=" << loggerStateToString(log.state())
-              << " entries=" << r.entryCount
-              << " chain=" << (r.ok ? "ok" : verifyErrorToString(r.reason)) << "\n";
+    std::cout << name << ": state=" << loggerStateToString(log.state()) << " entries=" << r.entryCount << " chain=" << (r.ok ? "ok" : verifyErrorToString(r.reason)) << "\n";
 }
-
 }
 
 int main()
@@ -60,7 +56,7 @@ int main()
     {
         if (!CryptoCore::init())
         {
-            std::cerr << "libsodium initialization failed\n";
+            std::cerr << "fatal: libsodium initialization failed\n";
             return 1;
         }
 
@@ -73,8 +69,7 @@ int main()
 
         SystemClock clock;
 
-        BankHsm bankHsm(kMasterKey, kEncKey, kMacKey, kAuditKey, kPinKey,
-            signPub, signSecret, boxPub, boxSecret);
+        BankHsm bankHsm(kMasterKey, kEncKey, kMacKey, kAuditKey, kPinKey, signPub, signSecret, boxPub, boxSecret);
         BankHsmAuditSigner serverSigner(bankHsm);
         FileLogStorage serverStorage("logs/server.log");
         FileAnchorStore serverAnchors("logs/server.anchor");
@@ -85,7 +80,7 @@ int main()
         AtmHsm atmHsm(bankHsm.signPublicKey(), bankHsm.boxPublicKey());
         if (!bringUp(atmHsm))
         {
-            std::cerr << "AtmHsm key ceremony failed\n";
+            std::cerr << "fatal: AtmHsm key ceremony failed\n";
             return 1;
         }
         AtmHsmAuditSigner atmSigner(atmHsm);
@@ -111,9 +106,8 @@ int main()
         ok = atmLog.sealCheckpoint() && ok;
 
         report("ATM-001", atmLog, LogVerifier(atmStorage, atmSigner));
-        report("SERVER ", serverLog, LogVerifier(serverStorage, serverSigner));
-        if (!atmCheckpoints.items().empty())
-            std::cout << "last ATM checkpoint: seq=" << atmCheckpoints.items().back().seqNo << "\n";
+        report("SERVER", serverLog, LogVerifier(serverStorage, serverSigner));
+        if (!atmCheckpoints.items().empty()) std::cout << "ATM-001: last_checkpoint_seq=" << atmCheckpoints.items().back().seqNo << "\n";
 
         return ok ? 0 : 2;
     }

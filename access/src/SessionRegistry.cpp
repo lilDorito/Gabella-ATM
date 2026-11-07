@@ -2,11 +2,7 @@
 
 #include "common/Invariant.h"
 
-SessionRegistry::SessionRegistry(const IClock& clock, std::int64_t ttlSeconds)
-    : _clock(clock), _ttlSeconds(ttlSeconds)
-{
-    ATM_INVARIANT(_ttlSeconds > 0, "sessions: ttl must be positive");
-}
+SessionRegistry::SessionRegistry(const IClock& clock, std::int64_t ttlSeconds) : _clock(clock), _ttlSeconds(ttlSeconds) { ATM_INVARIANT(_ttlSeconds > 0, "sessions: ttl must be positive"); }
 
 void SessionRegistry::open(const std::string& sessionId)
 {
@@ -14,10 +10,7 @@ void SessionRegistry::open(const std::string& sessionId)
     _sessions[sessionId] = _clock.nowUnix() + _ttlSeconds;
 }
 
-void SessionRegistry::close(const std::string& sessionId)
-{
-    _sessions.erase(sessionId);
-}
+void SessionRegistry::close(const std::string& sessionId) { _sessions.erase(sessionId); }
 
 bool SessionRegistry::isOpen(const std::string& sessionId) const
 {
@@ -30,7 +23,9 @@ void SessionRegistry::purgeExpired()
     const std::int64_t now = _clock.nowUnix();
     for (auto it = _sessions.begin(); it != _sessions.end();)
     {
-        if (now > it->second) it = _sessions.erase(it);
-        else ++it;
+        if (now > it->second)
+            it = _sessions.erase(it);
+        else
+            ++it;
     }
 }

@@ -10,8 +10,7 @@ class IStaffAuthenticator
 public:
     virtual ~IStaffAuthenticator() = default;
 
-    [[nodiscard]] virtual std::optional<Role> verify(const std::string& staffId,
-        const std::string& password) = 0;
+    [[nodiscard]] virtual std::optional<Role> verify(const std::string& staffId, const std::string& password) = 0;
 };
 
 class InMemoryStaffAuthenticator final : public IStaffAuthenticator
@@ -22,11 +21,10 @@ private:
         std::string password;
         Role role;
     };
+
     std::map<std::string, Entry> _users;
 
 public:
     void addUser(const std::string& staffId, const std::string& password, Role role);
-
-    [[nodiscard]] std::optional<Role> verify(const std::string& staffId,
-        const std::string& password) override;
+    [[nodiscard]] std::optional<Role> verify(const std::string& staffId, const std::string& password) override;
 };

@@ -6,15 +6,15 @@
 class AuthRequest
 {
 private:
-	std::string  _atmId;
-	std::string  _sessionId;
-	Action       _action;
-	std::string  _ciphertext;
-	std::string  _nonce;
-	std::int64_t _timestamp;
-	std::string  _pan;
-	std::int64_t _amount;
-	std::string  _mac;
+    std::string _atmId;
+    std::string _sessionId;
+    Action _action;
+    std::string _ciphertext;
+    std::string _nonce;
+    std::int64_t _timestamp;
+    std::string _pan;
+    std::int64_t _amount;
+    std::string _mac;
 
 public:
     AuthRequest(const std::string& atmId,
@@ -36,4 +36,8 @@ public:
     const std::string& getPan() const;
     std::int64_t getAmount() const;
     const std::string& getMac() const;
+    std::string macPayload() const;
+    std::string pinBinding() const;
+
+    static std::string pinBinding(const std::string& atmId, const std::string& sessionId, Action action, const std::string& nonce, std::int64_t timestamp, const std::string& pan, std::int64_t amount);
 };

@@ -6,46 +6,25 @@
 #include <string>
 #include <vector>
 
-#include "atm/DispenseResult.h"
-#include "atm/ServerMessages.h"
+#include "common/DispenseResult.h"
+#include "common/ServerMessages.h"
 #include "common/AuthRequest.h"
+#include "common/Clock.h"
 #include "crypto/BankHsm.h"
 #include "crypto/CryptoCore.h"
 #include "crypto/SignDomain.h"
-
-inline std::string responsePayload(const AuthResponse& r)
-{
-    return CryptoCore::canonicalEncode("", {
-        authStatusToString(r.status),
-        r.sessionId,
-        r.balance ? std::to_string(r.balance->kop()) : std::string("-"),
-        r.command ? r.command->signedPayload() : std::string("-")
-        });
-}
 
 class FakeBank
 {
 private:
     BankHsm& _hsm;
+    const IClock& _clock;
     std::string _pan;
     std::string _pinVerifyValue;
     std::set<std::string> _nonces;
     std::map<std::string, std::pair<std::string, Role>> _staff;
 
-    bool macValid(const AuthRequest& r) const
-    {
-        const std::string canonical = CryptoCore::canonicalEncode("REQ:", {
-            r.getAtmId(),
-            r.getSessionId(),
-            std::string(actionToString(r.getAction())),
-            r.getCiphertext(),
-            r.getNonce(),
-            std::to_string(r.getTimestamp()),
-            r.getPan(),
-            std::to_string(r.getAmount())
-            });
-        return _hsm.verifyMessage(canonical, r.getMac());
-    }
+    bool macValid(const AuthRequest& r) const { return _hsm.verifyMessage(r.macPayload(), r.getMac()); }
 
     AuthResponse finish(AuthResponse resp) const
     {
@@ -53,7 +32,7 @@ private:
         {
             resp.command->signature = *_hsm.sign(SignDomain::Dispense, resp.command->signedPayload());
         }
-        resp.signature = *_hsm.sign(SignDomain::Response, responsePayload(resp));
+        resp.signature = *_hsm.sign(SignDomain::Response, resp.signedPayload());
         return resp;
     }
 
@@ -66,8 +45,7 @@ public:
     std::vector<AuthRequest> seen;
     std::optional<std::int64_t> commandAmountOverrideKop;
 
-    FakeBank(BankHsm& hsm, std::string pan, const std::string& pin)
-        : _hsm(hsm), _pan(std::move(pan))
+    FakeBank(BankHsm& hsm, const IClock& clock, std::string pan, const std::string& pin) : _hsm(hsm), _clock(clock), _pan(std::move(pan))
     {
         _pinVerifyValue = *_hsm.computePinVerifyValue(_pan, pin);
         _staff["E-01"] = { "S3cretPass", Role::ServiceEngineer };
@@ -95,7 +73,7 @@ public:
             return finish(resp);
         }
 
-        if (!_hsm.verifyPin(r.getCiphertext(), r.getPan(), _pinVerifyValue))
+        if (!_hsm.verifyPin(r.getCiphertext(), r.getPan(), _pinVerifyValue, r.pinBinding()))
         {
             ++failedPins;
             if (failedPins >= 3)
@@ -138,6 +116,7 @@ public:
         command.sessionId = r.getSessionId();
         command.amountKop = commandAmountOverrideKop ? *commandAmountOverrideKop : kop;
         command.sequence = ++sequence;
+        command.expiresAt = _clock.nowUnix() + kDispenseCommandLifetimeSeconds;
 
         resp.status = AuthStatus::Approved;
         resp.command = command;
@@ -150,18 +129,21 @@ public:
         heldKop = 0;
     }
 
-    std::optional<StaffLoginResult> staffLogin(const std::string& staffId, const std::string& sealed) const
+    std::optional<StaffLoginResult> staffLogin(const StaffLoginRequest& request)
     {
-        auto it = _staff.find(staffId);
+        const std::int64_t age = _clock.nowUnix() - request.timestamp;
+        if (age > 60 || age < -60 || request.nonce.empty() || !_nonces.insert(request.nonce).second) return std::nullopt;
+
+        auto it = _staff.find(request.staffId);
         if (it == _staff.end()) return std::nullopt;
 
         std::string password;
-        if (!_hsm.openPassword(sealed, password)) return std::nullopt;
+        if (!_hsm.openPassword(request.sealedPassword, request.binding(), password)) return std::nullopt;
         const bool ok = it->second.first == password;
         CryptoCore::cleanse(password);
         if (!ok) return std::nullopt;
 
-        return StaffLoginResult{ "tok-" + staffId, it->second.second };
+        return StaffLoginResult{ "tok-" + request.staffId, it->second.second };
     }
 
     std::optional<Role> roleOfToken(const std::string& token) const
@@ -172,26 +154,26 @@ public:
         return it->second.second;
     }
 
-    SignedCommand signCommand(std::uint64_t seq, Action action, const std::string& atmId,
-        const std::string& params = "") const
+    SignedCommand signCommand(std::uint64_t seq, Action action, const std::string& atmId, const std::string& params = "") const
     {
         SignedCommand c;
         c.atmId = atmId;
         c.commandSeq = seq;
         c.action = action;
         c.params = params;
+        c.expiresAt = _clock.nowUnix() + 1800;
         c.signature = *_hsm.sign(SignDomain::Command, c.signedPayload());
         return c;
     }
 
-    DispenseCommand signDispense(const std::string& atmId, std::int64_t amountKop, std::uint64_t seq,
-        const std::string& sessionId = "s") const
+    DispenseCommand signDispense(const std::string& atmId, std::int64_t amountKop, std::uint64_t seq, const std::string& sessionId = "s") const
     {
         DispenseCommand c;
         c.atmId = atmId;
         c.sessionId = sessionId;
         c.amountKop = amountKop;
         c.sequence = seq;
+        c.expiresAt = _clock.nowUnix() + kDispenseCommandLifetimeSeconds;
         c.signature = *_hsm.sign(SignDomain::Dispense, c.signedPayload());
         return c;
     }

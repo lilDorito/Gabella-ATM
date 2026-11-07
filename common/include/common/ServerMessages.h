@@ -4,10 +4,12 @@
 #include <optional>
 #include <string>
 
-#include "atm/DispenseResult.h"
+#include "common/DispenseResult.h"
 #include "common/Action.h"
 #include "common/Money.h"
 #include "common/Role.h"
+
+inline constexpr std::int64_t kDispenseCommandLifetimeSeconds = 60;
 
 enum class AuthStatus
 {
@@ -26,6 +28,7 @@ struct DispenseCommand
     std::string sessionId;
     std::int64_t amountKop = 0;
     std::uint64_t sequence = 0;
+    std::int64_t expiresAt = 0;
     std::string signature;
 
     std::string signedPayload() const;
@@ -38,6 +41,8 @@ struct AuthResponse
     std::optional<Money> balance;
     std::optional<DispenseCommand> command;
     std::string signature;
+
+    std::string signedPayload() const;
 };
 
 struct DispenseReport
@@ -77,9 +82,21 @@ struct SignedCommand
     std::uint64_t commandSeq = 0;
     Action action = Action::RestoreFromOutOfService;
     std::string params;
+    std::int64_t expiresAt = 0;
     std::string signature;
 
     std::string signedPayload() const;
+};
+
+struct StaffLoginRequest
+{
+    std::string atmId;
+    std::string staffId;
+    std::string nonce;
+    std::int64_t timestamp = 0;
+    std::string sealedPassword;
+
+    std::string binding() const;
 };
 
 struct StaffLoginResult

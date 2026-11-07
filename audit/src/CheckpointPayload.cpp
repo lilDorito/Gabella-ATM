@@ -1,16 +1,8 @@
 #include "audit/CheckpointPayload.h"
 
-#include "crypto/CryptoCore.h"
+#include "common/Canonical.h"
 
-std::string checkpointPayload(const Checkpoint& cp)
-{
-    return CryptoCore::canonicalEncode("CKPT:", {
-        cp.logId,
-        std::to_string(cp.seqNo),
-        cp.hash,
-        std::to_string(cp.timestamp)
-        });
-}
+std::string checkpointPayload(const Checkpoint& cp) { return canonicalEncode("CKPT:", { cp.logId, std::to_string(cp.seqNo), cp.hash, std::to_string(cp.timestamp) }); }
 
 bool verifyCheckpointMac(const Checkpoint& cp, const IAuditSigner& signer)
 {

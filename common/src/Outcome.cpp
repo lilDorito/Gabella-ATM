@@ -2,7 +2,8 @@
 
 const char* outcomeToString(Outcome o)
 {
-    switch (o) {
+    switch (o)
+    {
     case Outcome::Success: return "Success";
     case Outcome::Failure: return "Failure";
     case Outcome::Info: return "Info";

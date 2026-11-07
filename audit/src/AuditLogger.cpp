@@ -12,7 +12,8 @@
 
 const char* loggerStateToString(LoggerState s)
 {
-    switch (s) {
+    switch (s)
+    {
     case LoggerState::Uninitialized: return "Uninitialized";
     case LoggerState::Ready: return "Ready";
     case LoggerState::Compromised: return "Compromised";
@@ -21,24 +22,18 @@ const char* loggerStateToString(LoggerState s)
     return "";
 }
 
-AuditLogger::AuditLogger(std::string logId,
-    LogStorage& storage,
-    AnchorStore& anchors,
-    const IAuditSigner& signer,
-    ICheckpointSink& sink,
-    const IClock& clock,
-    std::uint32_t checkpointInterval)
+AuditLogger::AuditLogger(std::string logId, LogStorage& storage, AnchorStore& anchors, const IAuditSigner& signer, ICheckpointSink& sink, const IClock& clock, std::uint32_t checkpointInterval)
     : _logId(std::move(logId)),
-    _storage(storage),
-    _anchors(anchors),
-    _signer(signer),
-    _sink(sink),
-    _clock(clock),
-    _checkpointInterval(checkpointInterval),
-    _lastHash(genesisHash())
+      _storage(storage),
+      _anchors(anchors),
+      _signer(signer),
+      _sink(sink),
+      _clock(clock),
+      _checkpointInterval(checkpointInterval),
+      _lastHash(genesisHash())
 {
-    if (_logId.empty()) throw std::invalid_argument("logId must not be empty");
-    if (_checkpointInterval == 0) throw std::invalid_argument("checkpointInterval must be positive");
+    if (_logId.empty()) throw std::invalid_argument("audit: logId must not be empty");
+    if (_checkpointInterval == 0) throw std::invalid_argument("audit: checkpointInterval must be positive");
 }
 
 LogEvent AuditLogger::integrityEvent(const VerifyResult& r) const
@@ -48,16 +43,14 @@ LogEvent AuditLogger::integrityEvent(const VerifyResult& r) const
     e.outcome = Outcome::Failure;
 
     std::string seq = r.firstBadSeq ? std::to_string(*r.firstBadSeq) : std::string("?");
-    if (r.reason == VerifyError::TornTail)
-        e.details = std::string(kTornEntryMarker) + " seq=" + seq;
-    else
-        e.details = std::string("reason=") + verifyErrorToString(r.reason) + " first_bad_seq=" + seq;
+    e.details = std::string("reason=") + verifyErrorToString(r.reason) + " first_bad_seq=" + seq;
     return e;
 }
 
 LoggerState AuditLogger::init()
 {
     std::lock_guard<std::mutex> lock(_mtx);
+    if (_state == LoggerState::Ready || _state == LoggerState::Compromised) return _state;
 
     LogVerifier verifier(_storage, _signer);
     VerifyResult chain = verifier.verifyChain();

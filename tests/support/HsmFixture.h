@@ -7,6 +7,7 @@
 #include "crypto/AtmHsm.h"
 #include "crypto/BankHsm.h"
 #include "crypto/CryptoCore.h"
+#include "crypto/KeyWrap.h"
 
 struct HsmFixture
 {
@@ -20,7 +21,6 @@ struct HsmFixture
     std::array<unsigned char, 64> signSecret{};
     std::array<unsigned char, 32> boxPub{};
     std::array<unsigned char, 32> boxSecret{};
-
     std::unique_ptr<BankHsm> bank;
     std::unique_ptr<AtmHsm> atm;
     bool operational = false;
@@ -30,14 +30,13 @@ struct HsmFixture
         crypto_sign_keypair(signPub.data(), signSecret.data());
         crypto_box_keypair(boxPub.data(), boxSecret.data());
 
-        bank = std::make_unique<BankHsm>(kMasterKey, kEncKey, kMacKey, auditKey, kPinKey,
-            signPub, signSecret, boxPub, boxSecret);
+        bank = std::make_unique<BankHsm>(kMasterKey, kEncKey, kMacKey, auditKey, kPinKey, signPub, signSecret, boxPub, boxSecret);
         atm = std::make_unique<AtmHsm>(signPub, boxPub);
 
         bool ok = atm->installMasterKey(kMasterKey);
-        ok = ok && atm->updateWorkingKey(KeyType::Encryption, *CryptoCore::aesCbcEncrypt(kMasterKey, kEncKey));
-        ok = ok && atm->updateWorkingKey(KeyType::Mac, *CryptoCore::aesCbcEncrypt(kMasterKey, kMacKey));
-        ok = ok && atm->updateWorkingKey(KeyType::Audit, *CryptoCore::aesCbcEncrypt(kMasterKey, auditKey));
+        ok = ok && atm->updateWorkingKey(KeyType::Encryption, *wrapWorkingKey(kMasterKey, KeyType::Encryption, kEncKey));
+        ok = ok && atm->updateWorkingKey(KeyType::Mac, *wrapWorkingKey(kMasterKey, KeyType::Mac, kMacKey));
+        ok = ok && atm->updateWorkingKey(KeyType::Audit, *wrapWorkingKey(kMasterKey, KeyType::Audit, auditKey));
         operational = ok && atm->state() == AtmHsmState::Operational;
     }
 };

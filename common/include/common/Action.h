@@ -28,7 +28,7 @@ inline const char* actionToString(Action a)
         "UpdateWorkingKey",
         "InstallMasterKey",
         "RestoreFromOutOfService",
-        "ResolveTransaction"
+        "ResolveTransaction",
     };
     return names[static_cast<int>(a)];
 }

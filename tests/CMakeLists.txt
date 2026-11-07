@@ -6,7 +6,6 @@ function(gabella_test name)
         SOURCES ${T_SOURCES}
         DEPS ${T_DEPS})
     target_include_directories(${name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/support")
-    target_compile_definitions(${name} PRIVATE GABELLA_INVARIANT_THROW_ONLY)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -25,5 +24,5 @@ gabella_test(test_atm
     DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::atm)
 
 gabella_test(test_access
-    SOURCES test_access.cpp
+    SOURCES access/test_access.cpp
     DEPS Gabella::common Gabella::audit Gabella::access)

@@ -5,12 +5,7 @@
 ApprovalPolicy ApprovalPolicy::makeDefault()
 {
     ApprovalPolicy p;
-    p.critical = {
-        Action::UpdateWorkingKey,
-        Action::InstallMasterKey,
-        Action::RestoreFromOutOfService,
-        Action::ResolveTransaction
-    };
+    p.critical = { Action::UpdateWorkingKey, Action::InstallMasterKey, Action::RestoreFromOutOfService, Action::ResolveTransaction };
     p.ttlSeconds = 1800;
     return p;
 }

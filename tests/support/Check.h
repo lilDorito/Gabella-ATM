@@ -2,21 +2,32 @@
 #include <iostream>
 #include <string>
 
-namespace gabella_test {
+namespace gabella_test
+{
+inline int& passedCount()
+{
+    static int n = 0;
+    return n;
+}
 
-inline int& passedCount() { static int n = 0; return n; }
-inline int& failedCount() { static int n = 0; return n; }
+inline int& failedCount()
+{
+    static int n = 0;
+    return n;
+}
 
 inline void check(bool cond, const std::string& name)
 {
     std::cout << (cond ? "  [PASS] " : "  [FAIL] ") << name << "\n";
-    if (cond) ++passedCount(); else ++failedCount();
+    if (cond)
+        ++passedCount();
+    else
+        ++failedCount();
 }
 
-inline void section(const std::string& title)
-{
-    std::cout << "\n=== " << title << " ===\n";
-}
+inline void banner(const std::string& title) { std::cout << title << "\n" << std::string(title.size(), '=') << "\n"; }
+
+inline void section(const std::string& title) { std::cout << "\n=== " << title << " ===\n"; }
 
 inline int summary()
 {
@@ -25,5 +36,4 @@ inline int summary()
     std::cout << "FAILED: " << failedCount() << "\n";
     return failedCount() == 0 ? 0 : 1;
 }
-
 }

@@ -1,5 +1,10 @@
 #include "crypto/BankHsm.h"
 
+#include <stdexcept>
+
+#include "common/Canonical.h"
+#include "crypto/KeyWrap.h"
+
 BankHsm::BankHsm(const std::string& masterKey,
     const std::string& encKey,
     const std::string& macKey,
@@ -10,26 +15,23 @@ BankHsm::BankHsm(const std::string& masterKey,
     std::array<unsigned char, 32> boxPublic,
     std::array<unsigned char, 32> boxSecret)
     : _masterKey(masterKey),
-    _encKey(encKey),
-    _macKey(macKey),
-    _auditKey(auditKey),
-    _pinKey(pinKey),
-    _signPublic(signPublic),
-    _signSecret(signSecret),
-    _boxPublic(boxPublic),
-    _boxSecret(boxSecret)
+      _encKey(encKey),
+      _macKey(macKey),
+      _auditKey(auditKey),
+      _pinKey(pinKey),
+      _signPublic(signPublic),
+      _signSecret(signSecret),
+      _boxPublic(boxPublic),
+      _boxSecret(boxSecret)
 {
-    if (masterKey.size() != 16) throw std::invalid_argument("masterKey must be 16 bytes");
-    if (encKey.size() != 16) throw std::invalid_argument("encKey must be 16 bytes");
-    if (macKey.size() != 16) throw std::invalid_argument("macKey must be 16 bytes");
-    if (auditKey.size() != 16) throw std::invalid_argument("auditKey must be 16 bytes");
-    if (pinKey.size() != 16) throw std::invalid_argument("pinKey must be 16 bytes");
+    if (masterKey.size() != 16) throw std::invalid_argument("bank hsm: masterKey must be 16 bytes");
+    if (encKey.size() != 16) throw std::invalid_argument("bank hsm: encKey must be 16 bytes");
+    if (macKey.size() != 16) throw std::invalid_argument("bank hsm: macKey must be 16 bytes");
+    if (auditKey.size() != 16) throw std::invalid_argument("bank hsm: auditKey must be 16 bytes");
+    if (pinKey.size() != 16) throw std::invalid_argument("bank hsm: pinKey must be 16 bytes");
 }
 
-BankHsm::~BankHsm()
-{
-    wipeKeys();
-}
+BankHsm::~BankHsm() { wipeKeys(); }
 
 void BankHsm::wipeKeys()
 {
@@ -48,9 +50,7 @@ void BankHsm::wipeKeys()
     _pendingKeys.clear();
 }
 
-bool BankHsm::extractPin(const std::string& pinBlock,
-    const std::string& pan,
-    std::string& out) const
+bool BankHsm::extractPin(const std::string& pinBlock, const std::string& pan, std::string& out) const
 {
     if (pinBlock.size() != 8) return false;
     if (pan.size() < 13) return false;
@@ -78,9 +78,7 @@ bool BankHsm::extractPin(const std::string& pinBlock,
         panField[i] = static_cast<unsigned char>(c - '0');
     }
 
-    for (int i = 0; i < 16; ++i)
-        pinField[i] = nibbles[i] ^ panField[i];
-
+    for (int i = 0; i < 16; ++i) pinField[i] = nibbles[i] ^ panField[i];
     if (pinField[0] != 0) return false;
 
     int pinLen = pinField[1];
@@ -102,65 +100,31 @@ bool BankHsm::extractPin(const std::string& pinBlock,
 
     return true;
 }
-bool BankHsm::verifyMessage(const std::string& data,
-	const std::string& mac) const
-{
-	return CryptoCore::hmacVerify(_macKey, data, mac);
-}
 
-bool BankHsm::verifyAudit(const std::string& data,
-    const std::string& mac) const
-{
-    return CryptoCore::hmacVerify(_auditKey, "AUDIT:" + data, mac);
-}
-
-std::optional<std::string> BankHsm::macAudit(const std::string& data) const
-{
-    return CryptoCore::hmacSha256(_auditKey, "AUDIT:" + data);
-}
+bool BankHsm::verifyMessage(const std::string& data, const std::string& mac) const { return CryptoCore::hmacVerify(_macKey, data, mac); }
+bool BankHsm::verifyAudit(const std::string& data, const std::string& mac) const { return CryptoCore::hmacVerify(_auditKey, "AUDIT:" + data, mac); }
+std::optional<std::string> BankHsm::macAudit(const std::string& data) const { return CryptoCore::hmacSha256(_auditKey, "AUDIT:" + data); }
 
 std::optional<std::string> BankHsm::sign(SignDomain domain, const std::string& data) const
 {
-	std::string tagged = std::string(tagOf(domain)) + data;
-	return CryptoCore::ed25519Sign(_signSecret, tagged);
+    std::string tagged = std::string(tagOf(domain)) + data;
+    return CryptoCore::ed25519Sign(_signSecret, tagged);
 }
 
-std::optional<std::string> BankHsm::computePinVerifyValue(const std::string& pan,
-    const std::string& pin) const
+std::optional<std::string> BankHsm::computePinVerifyValue(const std::string& pan, const std::string& pin) const { return CryptoCore::hmacSha256(_pinKey, canonicalEncode("PIN:", { pan, pin })); }
+
+bool BankHsm::verifyPin(const std::string& encryptedBlock, const std::string& pan, const std::string& pinVerifyValue, const std::string& binding) const
 {
-    return CryptoCore::hmacSha256(_pinKey,
-        CryptoCore::canonicalEncode("PIN:", { pan, pin }));
-}
+    if (binding.empty()) return false;
+    auto decrypted = CryptoCore::aesGcmDecrypt(_encKey, encryptedBlock, binding);
+    if (!decrypted) return false;
 
-bool BankHsm::verifyPin(const std::string& encryptedBlock,
-    const std::string& pan,
-    const std::string& pinVerifyValue) const
-{
-    auto padded = CryptoCore::aesCbcDecrypt(_encKey, encryptedBlock);
-    if (!padded) return false;
-    if (padded->size() != 16)
-    {
-        CryptoCore::cleanse(*padded);
-        return false;
-    }
-
-    for (int i = 8; i < 16; ++i)
-    {
-        if (static_cast<unsigned char>((*padded)[i]) != 0x08)
-        {
-            CryptoCore::cleanse(*padded);
-            return false;
-        }
-    }
-
-    std::string pinBlock = padded->substr(0, 8);
-    CryptoCore::cleanse(*padded);
-
+    std::string pinBlock = std::move(*decrypted);
     CryptoCore::StringWiper pinBlockWiper{ pinBlock };
+    if (pinBlock.size() != 8) return false;
 
     std::string pin;
     CryptoCore::StringWiper pinWiper{ pin };
-
     if (!extractPin(pinBlock, pan, pin)) return false;
 
     auto computed = computePinVerifyValue(pan, pin);
@@ -172,9 +136,21 @@ bool BankHsm::verifyPin(const std::string& encryptedBlock,
     return ok;
 }
 
-bool BankHsm::openPassword(const std::string& sealed, std::string& out) const
+bool BankHsm::openPassword(const std::string& sealed, const std::string& binding, std::string& out) const
 {
-    return CryptoCore::sealedBoxOpen(_boxPublic, _boxSecret, sealed, out);
+    CryptoCore::cleanse(out);
+    if (binding.empty()) return false;
+
+    std::string framed;
+    CryptoCore::StringWiper framedWiper{ framed };
+    if (!CryptoCore::sealedBoxOpen(_boxPublic, _boxSecret, sealed, framed)) return false;
+
+    auto fields = canonicalDecode("PWD:", framed);
+    if (!fields) return false;
+    const bool bound = fields->size() == 2 && CryptoCore::constantTimeEqual((*fields)[0], binding) && !(*fields)[1].empty();
+    if (bound) out = (*fields)[1];
+    for (auto& field : *fields) CryptoCore::cleanse(field);
+    return bound;
 }
 
 std::optional<std::string> BankHsm::prepareWorkingKey(KeyType type)
@@ -184,7 +160,7 @@ std::optional<std::string> BankHsm::prepareWorkingKey(KeyType type)
     auto newKey = CryptoCore::randomBytes(16);
     if (!newKey) return std::nullopt;
 
-    auto blob = CryptoCore::aesCbcEncrypt(_masterKey, *newKey);
+    auto blob = wrapWorkingKey(_masterKey, type, *newKey);
     if (!blob)
     {
         CryptoCore::cleanse(*newKey);
@@ -213,8 +189,8 @@ bool BankHsm::commitWorkingKey(KeyType type)
     switch (type)
     {
     case KeyType::Encryption: _encKey = newKey; break;
-    case KeyType::Mac:        _macKey = newKey; break;
-    case KeyType::Audit:      _auditKey = newKey; break;
+    case KeyType::Mac: _macKey = newKey; break;
+    case KeyType::Audit: _auditKey = newKey; break;
     }
 
     CryptoCore::cleanse(newKey);
@@ -231,12 +207,5 @@ bool BankHsm::cancelPendingWorkingKey(KeyType type)
     return true;
 }
 
-std::array<unsigned char, 32> BankHsm::signPublicKey() const
-{
-	return _signPublic;
-}
-
-std::array<unsigned char, 32>  BankHsm::boxPublicKey() const
-{
-	return _boxPublic;
-}
+std::array<unsigned char, 32> BankHsm::signPublicKey() const { return _signPublic; }
+std::array<unsigned char, 32> BankHsm::boxPublicKey() const { return _boxPublic; }

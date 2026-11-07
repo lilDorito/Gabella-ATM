@@ -1,10 +1,12 @@
 #pragma once
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <optional>
 #include <string>
 
-#include "atm/IAccessClient.h"
+#include "access/IAccessClient.h"
+#include "atm/CounterStore.h"
 #include "atm/ICardReader.h"
 #include "atm/IDisplay.h"
 #include "atm/IDispenser.h"
@@ -36,36 +38,46 @@ private:
     const LogVerifier& _verifier;
     IAccessClient& _access;
     IServerLink& _link;
+    ICounterStore& _commandSeqStore;
     const IClock& _clock;
-
     std::optional<Session> _session;
     bool _outOfService = false;
     bool _retainOnShutdown = false;
     bool _cardRetained = false;
     std::uint64_t _lastCommandSeq = 0;
+    bool _commandSeqUnreadable = false;
+    std::deque<StatusReport> _pendingStatus;
 
     void sessionFlow(const Card& card);
     void endSession();
     void terminate(ScreenId screen, const std::string& reason, Outcome outcome = Outcome::Failure);
     void enterOutOfService(bool retainCard, const std::string& reason);
     void step(SessionState to);
-
     void engineerMenu(const std::string& token);
     void collectorMenu(const std::string& token);
     void auditorMenu(const std::string& token);
     bool allowed(const std::string& token, Action action);
+    bool flushStatusReports();
+    void reportCassettes(StatusReport report, Role role, const std::string& action);
     std::optional<std::map<int, int>> askCounts(const std::string& what);
-
-    [[nodiscard]] bool log(EventType type, Outcome outcome, const std::string& details,
-        std::int64_t amountKop = 0, Role role = Role::Client, const std::string& actorId = "");
-    void logQuiet(EventType type, Outcome outcome, const std::string& details,
-        std::int64_t amountKop = 0, Role role = Role::Client, const std::string& actorId = "");
+    [[nodiscard]] bool log(EventType type, Outcome outcome, const std::string& details, std::int64_t amountKop = 0, Role role = Role::Client, const std::string& actorId = "");
+    void logQuiet(EventType type, Outcome outcome, const std::string& details, std::int64_t amountKop = 0, Role role = Role::Client, const std::string& actorId = "");
 
 public:
-    AtmController(std::string atmId, ICardReader& reader, IKeypad& keypad, IDisplay& display,
-        IDispenser& dispenser, ITamperSensor& tamper, PinModule& pin, AtmHsm& hsm,
-        AuditLogger& logger, const LogVerifier& verifier, IAccessClient& access,
-        IServerLink& link, const IClock& clock);
+    AtmController(std::string atmId,
+        ICardReader& reader,
+        IKeypad& keypad,
+        IDisplay& display,
+        IDispenser& dispenser,
+        ITamperSensor& tamper,
+        PinModule& pin,
+        AtmHsm& hsm,
+        AuditLogger& logger,
+        const LogVerifier& verifier,
+        IAccessClient& access,
+        IServerLink& link,
+        ICounterStore& commandSeqStore,
+        const IClock& clock);
     ~AtmController();
 
     AtmController(const AtmController&) = delete;

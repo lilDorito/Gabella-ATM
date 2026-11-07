@@ -15,6 +15,5 @@ private:
 
 public:
     [[nodiscard]] static PermissionTable makeDefault();
-
     [[nodiscard]] bool isAllowed(Role r, Action a) const;
 };

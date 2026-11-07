@@ -6,11 +6,11 @@
 #include <system_error>
 #include <utility>
 
-#include "Hex.h"
+#include "common/Hex.h"
 #include "audit/LogFormat.h"
 
-namespace {
-
+namespace
+{
 template <typename T>
 std::optional<T> parseInt(const std::string& s)
 {
@@ -20,15 +20,12 @@ std::optional<T> parseInt(const std::string& s)
     if (ec != std::errc() || ptr != s.data() + s.size()) return std::nullopt;
     return value;
 }
-
 }
 
-FileAnchorStore::FileAnchorStore(std::filesystem::path path)
-    : _path(std::move(path))
+FileAnchorStore::FileAnchorStore(std::filesystem::path path) : _path(std::move(path))
 {
     std::error_code ec;
-    if (_path.has_parent_path())
-        std::filesystem::create_directories(_path.parent_path(), ec);
+    if (_path.has_parent_path()) std::filesystem::create_directories(_path.parent_path(), ec);
 }
 
 bool FileAnchorStore::save(const Checkpoint& cp)
@@ -41,11 +38,7 @@ bool FileAnchorStore::save(const Checkpoint& cp)
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) return false;
-        out << cp.logId << '\n'
-            << cp.seqNo << '\n'
-            << cp.hash << '\n'
-            << cp.timestamp << '\n'
-            << toHex(cp.mac) << '\n';
+        out << cp.logId << '\n' << cp.seqNo << '\n' << cp.hash << '\n' << cp.timestamp << '\n' << toHex(cp.mac) << '\n';
         out.flush();
         if (!out.good()) return false;
     }
@@ -61,9 +54,7 @@ std::optional<Checkpoint> FileAnchorStore::load() const
     if (!in) return std::nullopt;
 
     std::string logId, seq, hash, ts, mac;
-    if (!std::getline(in, logId) || !std::getline(in, seq) || !std::getline(in, hash)
-        || !std::getline(in, ts) || !std::getline(in, mac))
-        return std::nullopt;
+    if (!std::getline(in, logId) || !std::getline(in, seq) || !std::getline(in, hash) || !std::getline(in, ts) || !std::getline(in, mac)) return std::nullopt;
 
     auto seqNo = parseInt<std::uint64_t>(seq);
     auto timestamp = parseInt<std::int64_t>(ts);

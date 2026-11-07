@@ -2,8 +2,8 @@
 #include <cstdint>
 #include <map>
 
-#include "atm/DispenseResult.h"
-#include "atm/ServerMessages.h"
+#include "common/DispenseResult.h"
+#include "common/ServerMessages.h"
 
 class IDispenser
 {

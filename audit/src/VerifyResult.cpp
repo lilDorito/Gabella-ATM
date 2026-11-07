@@ -2,7 +2,8 @@
 
 const char* verifyErrorToString(VerifyError e)
 {
-    switch (e) {
+    switch (e)
+    {
     case VerifyError::None: return "None";
     case VerifyError::MalformedEntry: return "MalformedEntry";
     case VerifyError::SeqGap: return "SeqGap";

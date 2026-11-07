@@ -12,9 +12,7 @@ private:
 public:
     static std::optional<Money> fromKop(std::int64_t v);
     static Money zero() { return Money(0); }
-
     std::int64_t kop() const { return _kop; }
-
     [[nodiscard]] std::optional<Money> checkedAdd(Money other) const;
     bool isMultipleOf(std::int64_t kop) const;
 

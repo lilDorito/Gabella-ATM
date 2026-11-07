@@ -8,12 +8,7 @@ PermissionTable PermissionTable::makeDefault()
     rules[Role::ServiceEngineer] = { Action::LoadCash, Action::RunDiagnostics };
     rules[Role::CashCollector] = { Action::CollectCash };
     rules[Role::Auditor] = { Action::ReadLog, Action::VerifyLog };
-    rules[Role::Admin] = {
-        Action::UpdateWorkingKey,
-        Action::InstallMasterKey,
-        Action::RestoreFromOutOfService,
-        Action::ResolveTransaction
-    };
+    rules[Role::Admin] = { Action::UpdateWorkingKey, Action::InstallMasterKey, Action::RestoreFromOutOfService, Action::ResolveTransaction };
 
     return PermissionTable(std::move(rules));
 }

@@ -4,10 +4,7 @@
 #include "crypto/BankHsm.h"
 #include "crypto/CryptoCore.h"
 
-std::optional<std::string> AtmHsmAuditSigner::sign(const std::string& data) const
-{
-    return _hsm.macAudit(data);
-}
+std::optional<std::string> AtmHsmAuditSigner::sign(const std::string& data) const { return _hsm.macAudit(data); }
 
 bool AtmHsmAuditSigner::verify(const std::string& data, const std::string& mac) const
 {
@@ -18,12 +15,5 @@ bool AtmHsmAuditSigner::verify(const std::string& data, const std::string& mac) 
     return ok;
 }
 
-std::optional<std::string> BankHsmAuditSigner::sign(const std::string& data) const
-{
-    return _hsm.macAudit(data);
-}
-
-bool BankHsmAuditSigner::verify(const std::string& data, const std::string& mac) const
-{
-    return _hsm.verifyAudit(data, mac);
-}
+std::optional<std::string> BankHsmAuditSigner::sign(const std::string& data) const { return _hsm.macAudit(data); }
+bool BankHsmAuditSigner::verify(const std::string& data, const std::string& mac) const { return _hsm.verifyAudit(data, mac); }

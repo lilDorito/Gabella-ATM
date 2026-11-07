@@ -6,13 +6,10 @@
 
 namespace
 {
-
-    bool allDigits(const std::string& s)
-    {
-        return !s.empty() && std::all_of(s.begin(), s.end(),
-            [](unsigned char c) { return c >= '0' && c <= '9'; });
-    }
-
+bool allDigits(const std::string& s)
+{
+    return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
+}
 }
 
 bool KeypadEmulator::readHiddenPin(std::string& out)
@@ -45,7 +42,6 @@ std::optional<Action> KeypadEmulator::readAction()
 {
     std::string s;
     if (!_enabled || !_input.nextInto(s)) return std::nullopt;
-
     if (s == "1" || s == "balance") return Action::CheckBalance;
     if (s == "2" || s == "withdraw") return Action::Withdraw;
     return std::nullopt;

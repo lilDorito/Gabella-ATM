@@ -1,9 +1,6 @@
 #include "atm/CardReaderEmulator.h"
 
-void CardReaderEmulator::insertCard(const std::string& pan, int expMonth, int expYear)
-{
-    _pending.push_back(Pending{ Card(pan, expMonth, expYear), expMonth, expYear });
-}
+void CardReaderEmulator::insertCard(const std::string& pan, int expMonth, int expYear) { _pending.push_back(Pending{ Card(pan, expMonth, expYear), expMonth, expYear }); }
 
 std::optional<Card> CardReaderEmulator::readCard()
 {

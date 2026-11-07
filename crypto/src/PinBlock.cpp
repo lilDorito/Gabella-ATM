@@ -2,22 +2,20 @@
 
 static int pinNibble(const std::string& pin, int i)
 {
-    if (i == 0) return 0x0;                                          
-    if (i == 1) return static_cast<int>(pin.size());                 
-    if (i < 2 + static_cast<int>(pin.size()))
-        return pin[i - 2] - '0';                                     
-    return 0xF;                                                      
+    if (i == 0) return 0x0;
+    if (i == 1) return static_cast<int>(pin.size());
+    if (i < 2 + static_cast<int>(pin.size())) return pin[i - 2] - '0';
+    return 0xF;
 }
 
 static int panNibble(const std::string& pan, int i)
 {
-    if (i < 4) return 0;                                             
+    if (i < 4) return 0;
 
     return pan[pan.size() - 13 + (i - 4)] - '0';
 }
 
-bool buildPinBlock(const std::string& pin, const std::string& pan,
-    std::string& out)
+bool buildPinBlock(const std::string& pin, const std::string& pan, std::string& out)
 {
     if (pin.size() < 4 || pin.size() > 12) return false;
     for (char c : pin)

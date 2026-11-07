@@ -18,8 +18,7 @@ public:
         return _requests.emplace(r.requestId, std::move(copy)).second;
     }
 
-    bool insertApproval(const std::string& requestId, const std::string& staffId,
-        std::int64_t) override
+    bool insertApproval(const std::string& requestId, const std::string& staffId, std::int64_t) override
     {
         auto it = _requests.find(requestId);
         if (it == _requests.end()) return false;
@@ -40,6 +39,14 @@ public:
         auto it = _requests.find(requestId);
         if (it == _requests.end() || it->second.status != from) return false;
         it->second.status = to;
+        return true;
+    }
+
+    bool setExpiresAt(const std::string& requestId, std::int64_t expiresAt) override
+    {
+        auto it = _requests.find(requestId);
+        if (it == _requests.end()) return false;
+        it->second.expiresAt = expiresAt;
         return true;
     }
 

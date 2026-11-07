@@ -18,8 +18,7 @@ AttackReport AttackScenarios::runJackpotting()
     ServicePortEmulator port(_dispenser);
     const DispenseResult r = port.sendRawDispense(_atmId, 5000LL * 100);
     const bool ok = r == DispenseResult::InvalidSignature && _dispenser.cassetteCounts() == before;
-    return { "Jackpotting через сервісний порт", ok,
-        std::string("результат: ") + dispenseResultToString(r) };
+    return { "Jackpotting via service port", ok, std::string("result=") + dispenseResultToString(r) };
 }
 
 AttackReport AttackScenarios::runSkimmer()
@@ -30,8 +29,7 @@ AttackReport AttackScenarios::runSkimmer()
     (void)_reader.readCard();
     (void)_reader.eject();
     const bool ok = _reader.skimmed().size() == before + 1;
-    return { "Накладка на картрідер", ok,
-        "перехоплено лише номер і термін; PIN недоступний картрідеру" };
+    return { "Card reader skimmer", ok, "captured=pan,expiry pin_captured=false" };
 }
 
 AttackReport AttackScenarios::runStepSkipping()
@@ -52,6 +50,5 @@ AttackReport AttackScenarios::runStepSkipping()
     }
 
     const bool ok = blocked && session.getState() == SessionState::AwaitingPin;
-    return { "Перестрибування кроку (PIN -> видача)", ok,
-        "IllegalTransitionError, стан не змінився" };
+    return { "Step skipping (PIN -> dispense)", ok, "result=IllegalTransitionError state=AwaitingPin" };
 }

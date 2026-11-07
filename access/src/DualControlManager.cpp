@@ -3,47 +3,31 @@
 #include <algorithm>
 #include <utility>
 
+#include "common/Hex.h"
 #include "common/Invariant.h"
 
 namespace
 {
-
-    std::string toHexLower(const std::string& bytes)
-    {
-        static const char* digits = "0123456789abcdef";
-        std::string out;
-        out.reserve(bytes.size() * 2);
-        for (unsigned char c : bytes)
-        {
-            out.push_back(digits[c >> 4]);
-            out.push_back(digits[c & 0x0F]);
-        }
-        return out;
-    }
-
-    std::string formatRequestId(const std::string& eightBytes)
-    {
-        const std::string h = toHexLower(eightBytes);
-        return "DC-" + h.substr(0, 4) + "-" + h.substr(4, 4) + "-" + h.substr(8, 4) + "-" + h.substr(12, 4);
-    }
-
+std::string formatRequestId(const std::string& eightBytes)
+{
+    const std::string h = toHex(eightBytes);
+    return "DC-" + h.substr(0, 4) + "-" + h.substr(4, 4) + "-" + h.substr(8, 4) + "-" + h.substr(12, 4);
+}
 }
 
-DualControlManager::DualControlManager(IDualControlRepository& repo, const ApprovalPolicy& policy,
-    const IClock& clock, IAuditSink& sink, RandomBytesFn rnd, ActiveAdminsFn activeAdmins)
+DualControlManager::DualControlManager(IDualControlRepository& repo, const ApprovalPolicy& policy, const IClock& clock, IAuditSink& sink, RandomBytesFn rnd, ActiveAdminsFn activeAdmins)
     : _repo(repo),
-    _policy(policy),
-    _clock(clock),
-    _sink(sink),
-    _rnd(std::move(rnd)),
-    _activeAdmins(std::move(activeAdmins))
+      _policy(policy),
+      _clock(clock),
+      _sink(sink),
+      _rnd(std::move(rnd)),
+      _activeAdmins(std::move(activeAdmins))
 {
     ATM_INVARIANT(static_cast<bool>(_rnd), "dual control: random source must be set");
     ATM_INVARIANT(static_cast<bool>(_activeAdmins), "dual control: admin counter must be set");
 }
 
-bool DualControlManager::log(EventType type, Outcome outcome, Role role,
-    const std::string& actorId, const std::string& details)
+bool DualControlManager::log(EventType type, Outcome outcome, Role role, const std::string& actorId, const std::string& details)
 {
     LogEvent e;
     e.type = type;
@@ -56,13 +40,12 @@ bool DualControlManager::log(EventType type, Outcome outcome, Role role,
 
 CriticalRequest DualControlManager::withEffectiveStatus(CriticalRequest r) const
 {
-    if (r.status == RequestStatus::Pending && _clock.nowUnix() >= r.expiresAt)
-        r.status = RequestStatus::Expired;
+    const bool open = r.status == RequestStatus::Pending || r.status == RequestStatus::Approved;
+    if (open && _clock.nowUnix() >= r.expiresAt) r.status = RequestStatus::Expired;
     return r;
 }
 
-std::optional<std::string> DualControlManager::open(const std::string& initiatorId, Action a,
-    const std::string& params)
+std::optional<std::string> DualControlManager::open(const std::string& initiatorId, Action a, const std::string& params)
 {
     if (initiatorId.empty() || !_policy.isCritical(a)) return std::nullopt;
 
@@ -85,15 +68,10 @@ std::optional<std::string> DualControlManager::open(const std::string& initiator
     r.expiresAt = now + _policy.ttlSeconds;
     r.status = RequestStatus::Pending;
 
-    if (!log(EventType::DUAL_CONTROL_REQUESTED, Outcome::Info, Role::Admin, initiatorId,
-        std::string("action=") + actionToString(a) + " id=" + r.requestId
-        + " required=" + std::to_string(required)))
-        return std::nullopt;
+    const std::string details = "request_id=" + r.requestId + " action=" + actionToString(a) + " required=" + std::to_string(required);
+    if (!log(EventType::DUAL_CONTROL_REQUESTED, Outcome::Info, Role::Admin, initiatorId, details)) return std::nullopt;
 
-    const bool stored = _repo.inTransaction([&]
-        {
-            return _repo.insertRequest(r) && _repo.insertApproval(r.requestId, initiatorId, now);
-        });
+    const bool stored = _repo.inTransaction([&] { return _repo.insertRequest(r) && _repo.insertApproval(r.requestId, initiatorId, now); });
     if (!stored) return std::nullopt;
 
     return r.requestId;
@@ -107,8 +85,7 @@ ApprovalResult DualControlManager::approve(const std::string& requestId, const s
     if (!req) return ApprovalResult::UnknownRequest;
 
     const std::int64_t now = _clock.nowUnix();
-    const bool already = std::find(req->approvers.begin(), req->approvers.end(), approverId)
-        != req->approvers.end();
+    const bool already = std::find(req->approvers.begin(), req->approvers.end(), approverId) != req->approvers.end();
 
     if (req->status == RequestStatus::Expired) return ApprovalResult::Expired;
     if (req->status == RequestStatus::Pending && now >= req->expiresAt)
@@ -116,18 +93,16 @@ ApprovalResult DualControlManager::approve(const std::string& requestId, const s
         (void)_repo.setStatus(requestId, RequestStatus::Pending, RequestStatus::Expired);
         return ApprovalResult::Expired;
     }
-    if (req->status != RequestStatus::Pending)
-        return already ? ApprovalResult::AlreadyApproved : ApprovalResult::NotEligible;
+    if (req->status != RequestStatus::Pending) return already ? ApprovalResult::AlreadyApproved : ApprovalResult::NotEligible;
     if (already) return ApprovalResult::AlreadyApproved;
 
     const std::size_t after = req->approvers.size() + 1;
-    if (!log(EventType::DUAL_CONTROL_APPROVED, Outcome::Info, Role::Admin, approverId,
-        "id=" + requestId + " approvals=" + std::to_string(after) + "/"
-        + std::to_string(req->requiredApprovals)))
-        return ApprovalResult::AuditUnavailable;
+    const std::string details = "request_id=" + requestId + " approvals=" + std::to_string(after) + "/" + std::to_string(req->requiredApprovals);
+    if (!log(EventType::DUAL_CONTROL_APPROVED, Outcome::Info, Role::Admin, approverId, details)) return ApprovalResult::AuditUnavailable;
 
     ApprovalResult result = ApprovalResult::UnknownRequest;
-    const bool committed = _repo.inTransaction([&]
+    const bool committed = _repo.inTransaction(
+        [&]
         {
             if (!_repo.insertApproval(requestId, approverId, now))
             {
@@ -136,7 +111,7 @@ ApprovalResult DualControlManager::approve(const std::string& requestId, const s
             }
             if (_repo.countApprovals(requestId) >= req->requiredApprovals)
             {
-                if (!_repo.setStatus(requestId, RequestStatus::Pending, RequestStatus::Approved))
+                if (!_repo.setStatus(requestId, RequestStatus::Pending, RequestStatus::Approved) || !_repo.setExpiresAt(requestId, now + _policy.ttlSeconds))
                 {
                     result = ApprovalResult::UnknownRequest;
                     return false;
@@ -158,10 +133,12 @@ bool DualControlManager::markExecuted(const std::string& requestId)
 {
     const auto req = _repo.find(requestId);
     if (!req || req->status != RequestStatus::Approved) return false;
-
-    if (!log(EventType::DUAL_CONTROL_EXECUTED, Outcome::Success, Role::System, "",
-        "id=" + requestId))
+    if (_clock.nowUnix() >= req->expiresAt)
+    {
+        (void)_repo.setStatus(requestId, RequestStatus::Approved, RequestStatus::Expired);
         return false;
+    }
+    if (!log(EventType::DUAL_CONTROL_EXECUTED, Outcome::Success, Role::System, "", "request_id=" + requestId)) return false;
 
     return _repo.setStatus(requestId, RequestStatus::Approved, RequestStatus::Executed);
 }
@@ -173,13 +150,12 @@ std::optional<CriticalRequest> DualControlManager::get(const std::string& reques
     return withEffectiveStatus(std::move(*r));
 }
 
-std::optional<CriticalRequest> DualControlManager::getApproved(const std::string& requestId,
-    Action a, const std::string& params) const
+std::optional<CriticalRequest> DualControlManager::getApproved(const std::string& requestId, Action a, const std::string& params) const
 {
     auto r = _repo.find(requestId);
     if (!r) return std::nullopt;
-    if (r->status != RequestStatus::Approved || r->action != a || r->params != params)
-        return std::nullopt;
+    if (r->status != RequestStatus::Approved || r->action != a || r->params != params) return std::nullopt;
+    if (_clock.nowUnix() >= r->expiresAt) return std::nullopt;
     return r;
 }
 

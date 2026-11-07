@@ -14,8 +14,7 @@ private:
     std::string _hash;
 
 public:
-    LogEntry(std::uint64_t seqNo, std::int64_t timestamp, LogEvent event,
-        std::string prevHash, std::string hash);
+    LogEntry(std::uint64_t seqNo, std::int64_t timestamp, LogEvent event, std::string prevHash, std::string hash);
 
     std::uint64_t getSeqNo() const { return _seqNo; }
     std::int64_t getTimestamp() const { return _timestamp; }

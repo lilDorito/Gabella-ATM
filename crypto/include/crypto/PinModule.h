@@ -8,18 +8,11 @@
 class PinModule
 {
 private:
-	AtmHsm& _hsm;
+    AtmHsm& _hsm;
 
 public:
-	PinModule(AtmHsm& hsm) : _hsm(hsm) {}
+    PinModule(AtmHsm& hsm) : _hsm(hsm) {}
 
-    [[nodiscard]] std::optional<AuthRequest> processPin(
-        const Card& card,
-        const std::string& pin,
-        Action action,
-        std::int64_t amount,
-        const std::string& sessionId,
-        const std::string& atmId,
-        std::int64_t timestamp) const;
-	
+    [[nodiscard]] std::optional<AuthRequest>
+    processPin(const Card& card, const std::string& pin, Action action, std::int64_t amount, const std::string& sessionId, const std::string& atmId, std::int64_t timestamp) const;
 };

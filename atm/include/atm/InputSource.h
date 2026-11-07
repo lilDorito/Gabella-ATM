@@ -11,9 +11,7 @@ private:
     std::deque<std::string> _queue;
 
 public:
-    explicit InputSource(bool scripted = true, int timeoutSec = 30)
-        : _scripted(scripted), _timeoutSec(timeoutSec) {
-    }
+    explicit InputSource(bool scripted = true, int timeoutSec = 30) : _scripted(scripted), _timeoutSec(timeoutSec) {}
 
     void push(std::string line) { _queue.push_back(std::move(line)); }
     bool nextInto(std::string& out);
