@@ -15,6 +15,7 @@ private:
     std::string _encKey;
     std::string _macKey;
     std::string _auditKey;
+    std::string _serverAuditKey;
     std::string _pinKey;
     std::array<unsigned char, 32> _signPublic;
     std::array<unsigned char, 64> _signSecret;
@@ -46,6 +47,8 @@ public:
     [[nodiscard]] bool verifyMessage(const std::string& data, const std::string& mac) const;
     [[nodiscard]] bool verifyAudit(const std::string& data, const std::string& mac) const;
     [[nodiscard]] std::optional<std::string> macAudit(const std::string& data) const;
+    [[nodiscard]] bool verifyServerAudit(const std::string& data, const std::string& mac) const;
+    [[nodiscard]] std::optional<std::string> macServerAudit(const std::string& data) const;
     [[nodiscard]] std::optional<std::string> sign(SignDomain domain, const std::string& data) const;
     [[nodiscard]] bool verifyPin(const std::string& encryptedBlock, const std::string& pan, const std::string& pinVerifyValue, const std::string& binding) const;
     [[nodiscard]] std::optional<std::string> computePinVerifyValue(const std::string& pan, const std::string& pin) const;

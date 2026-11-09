@@ -17,4 +17,5 @@ struct LogEvent
     std::string maskedPan;
     std::optional<Money> amount;
     std::string details;
+    std::string opId;
 };

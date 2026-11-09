@@ -32,13 +32,16 @@ const char* eventTypeToString(EventType t)
     case EventType::AUDIT_ACCESS: return "AUDIT_ACCESS";
     case EventType::LOG_STARTED: return "LOG_STARTED";
     case EventType::LOG_INTEGRITY_FAILURE: return "LOG_INTEGRITY_FAILURE";
+    case EventType::CHECKPOINT_ACCEPTED: return "CHECKPOINT_ACCEPTED";
+    case EventType::CHECKPOINT_REJECTED: return "CHECKPOINT_REJECTED";
+    case EventType::LOG_ROLLBACK_DETECTED: return "LOG_ROLLBACK_DETECTED";
     }
     return "";
 }
 
 std::optional<EventType> eventTypeFromString(std::string_view s)
 {
-    for (int i = 0; i <= static_cast<int>(EventType::LOG_INTEGRITY_FAILURE); ++i)
+    for (int i = 0; i <= static_cast<int>(EventType::LOG_ROLLBACK_DETECTED); ++i)
     {
         EventType t = static_cast<EventType>(i);
         if (s == eventTypeToString(t)) return t;

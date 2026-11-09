@@ -1,5 +1,7 @@
 #include "common/AccessTypes.h"
 
+#include "common/Canonical.h"
+
 const char* verdictToString(Verdict v)
 {
     switch (v)
@@ -24,3 +26,5 @@ const char* denyReasonToString(DenyReason r)
     }
     return "";
 }
+
+std::string AccessRequest::payload() const { return canonicalEncode("ACC:", { atmId, sessionId, staffToken, actionToString(action), params }); }

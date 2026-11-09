@@ -4,7 +4,7 @@ A C++17 model of an ATM and the bank behind it, built around one rule: **the ser
 
 The experiment asks what an ATM looks like if you assume its own software can be compromised. Nothing on the ATM is trusted to make a money decision. It collects input, asks the server, and carries out only answers the server has signed. The hardware is emulated in code, so every attack in the threat model can be run as a test.
 
-> **Status:** the ATM, cryptography, audit and access modules are complete and tested. The bank server is in progress; until it lands, the tests play the bank with an in-process fake that uses the real cryptography.
+> **Status:** the ATM, cryptography, audit and access modules are complete and tested. The bank server has its foundation (database, request gate, API facade, audit side); the money, staff and command services are being built on top of it. Until they land, the ATM tests play the bank with an in-process fake that uses the real cryptography.
 
 ## 1. How it works
 
@@ -41,7 +41,8 @@ Each module is its own library, `Gabella::<module>`, and the build enforces the 
 | Audit | `audit/` | `AuditLogger`, hash-chained log format, checkpoints and anchors, `LogVerifier`, data policy | common, crypto |
 | Access | `access/` | Permissions, staff tokens and login, dual control, the ATM-side `AccessClient` | common, audit |
 | ATM | `atm/` | `AtmController`, the session state machine, emulated hardware, attack scenarios | all of the above |
-| Server | `server/`, `server_api/`, `tools/` | Bank server, its public API and a database seeding tool | in progress |
+| Server API | `server_api/` | `IServerApi`, the one interface the bank exposes to ATMs | common |
+| Server | `server/`, `tools/` | `BankServer` facade, SQLite database and repositories, `RequestGate`, checkpoint service; the `verify_log` and `seed_db` tools | all of the above except atm |
 
 `app/` holds a small demo that brings up both HSMs and both audit logs and verifies them.
 
@@ -59,6 +60,7 @@ The modules meet through a handful of narrow interfaces, which is also what make
   std::optional<StaffLoginResult> staffLogin(const StaffLoginRequest& request);
   ```
 
+- **Bank API:** `IServerApi` is what the server offers. Every call except authorization (which carries its own MAC) comes with a `RequestHeader`: ATM ID, a single-use nonce, a timestamp and a MAC bound to the call and its body. `RequestGate` checks all four before any service sees the request, and `BankServer` turns any internal failure into a refusal instead of an exception.
 - **Access:** `IAccessClient` asks the server whether a staff token may perform an action; `IAccessDecider` is the server-side answer.
 - **Audit:** modules write events only through `IAuditSink::record()`. A `false` result means the event was not stored, and a critical action must not go ahead.
 - **Storage:** `ICounterStore`, `IDualControlRepository`, `IStaffAuthenticator`, `ICheckpointSink`. In-memory versions back the tests; counters and logs also have file-backed versions, and the SQLite ones come with the server.
@@ -72,23 +74,35 @@ Every signed or MACed message has exactly one definition of its bytes (`signedPa
 - **No replays.** Request nonces are single-use. Dispense and service commands carry sequence numbers that are stored before they are executed, and both expire.
 - **Captured secrets don't travel.** PIN ciphertexts and sealed passwords are bound to the request they were made for.
 - **Tamper-evident logs.** Each entry stores the SHA-256 of the previous one. Every 50 entries and at the end of each session, a checkpoint MACed with the audit key leaves the ATM, so truncation and full rewrites are caught as well as edits. A write interrupted by a crash is detected and recorded on the next start.
+- **The server remembers.** Checkpoints are stored append-only. A checkpoint that contradicts one already stored is recorded as a rollback and the ATM is flagged for review. An auditor at the ATM gets the latest checkpoint signed by the server, with the request's nonce echoed, so an old answer cannot be replayed.
+- **Intent before effect.** Server actions are logged as an intent before the database changes and as a result after, under one operation ID. After a crash, open intents are checked against the database and closed.
 - **Nothing sensitive is logged.** PINs, passwords and keys never reach the log, card numbers are masked, and the data policy rejects anything that looks like a full card number.
 - **Fail closed.** If a counter cannot be stored, a log cannot be written or cassette counts cannot be confirmed, the ATM refuses to act rather than guess.
 
 ## 5. Tests
 
-Four test programs, run by `ctest`:
+Six test programs, run by `ctest`:
 
 | Suite | Checks | Covers |
 |---|---|---|
 | `test_crypto` | 163 | primitives, PIN blocks, HSM lifecycle, key wrapping and rotation, MACs, signatures, sealed boxes, tamper and recovery |
-| `test_audit` | 101 | entry format, hash chain, checkpoints, write failures, restarts and torn writes, tampering, file storage, concurrent writers |
-| `test_atm` | 148 | session state machine, dispenser, withdrawals end to end, fail-closed paths, tamper and recovery, signed commands, service and auditor menus |
+| `test_audit` | 114 | entry format, hash chain, checkpoints, write failures, restarts and torn writes, tampering, file storage, concurrent writers, open intents |
+| `test_atm` | 153 | session state machine, dispenser, withdrawals end to end, fail-closed paths, tamper and recovery, signed commands, service and auditor menus |
 | `test_access` | 127 | permissions, approval thresholds, tokens, login, dual control end to end |
+| `test_server_core` | 56 | schema and its protections, transactions, repositories, request gate, facade error handling |
+| `test_server_audit` | 57 | server log, checkpoint acceptance, rollback detection, signed checkpoint replies, crash recovery |
 
 A good share of them are **attack tests**: jackpotting through the service port, a card skimmer, skipping a step in the session, replaying commands after a restart, holding back a dispense command, moving a captured PIN or password into a new request, and editing, truncating or rewriting the log. Each one has to end in a refusal.
 
 The `sanitize` preset runs everything under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+A log can also be checked by hand, optionally against the checkpoints stored in the bank database:
+
+```bash
+./build/debug/tools/verify_log logs/atm-001.log --db bank.db --log-id ATM-001
+```
+
+It exits with 0 for an intact log, 1 for damage and 2 for a usage or read error.
 
 ## 6. Building
 
@@ -140,7 +154,7 @@ Every module has the same shape:
 - **One process.** The ATM and the server run side by side and talk through an interface, not a network.
 - **Emulated hardware.** The HSM, dispenser and sensors are classes that behave like their real counterparts, not drivers for them.
 - **The keypad is not a secure PIN pad.** The ATM software sees the PIN as it is typed, so software that records keystrokes is out of scope.
-- **The server is not finished.** Until it is, its behaviour lives in the test fake, and the SQLite repositories are still to come.
+- **The server is not finished.** Authorization, reconciliation, staff login and commands answer with refusals until their services land, and the ATM side still talks to the test fake.
 
 ## 9. Authors
 

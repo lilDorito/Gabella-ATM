@@ -23,5 +23,5 @@ public:
     virtual std::optional<StaffLoginResult> staffLogin(const StaffLoginRequest& request) = 0;
     virtual void staffLogout(const std::string& token) = 0;
     virtual void reportTamper() = 0;
-    virtual std::optional<Checkpoint> latestCheckpoint() = 0;
+    virtual std::optional<SignedCheckpoint> latestCheckpoint(const std::string& auditorToken, const std::string& nonce) = 0;
 };

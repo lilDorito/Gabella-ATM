@@ -4,3 +4,7 @@ if(_seed_db_sources)
         SOURCES ${_seed_db_sources}
         DEPS Gabella::server Gabella::crypto)
 endif()
+
+gabella_executable(verify_log
+    SOURCES verify_log/main.cpp
+    DEPS Gabella::server Gabella::audit)

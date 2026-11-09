@@ -154,6 +154,15 @@ public:
         return it->second.second;
     }
 
+    SignedCheckpoint signCheckpoint(const Checkpoint& cp, const std::string& nonce) const
+    {
+        SignedCheckpoint s;
+        s.checkpoint = cp;
+        s.requestNonce = nonce;
+        s.signature = *_hsm.sign(SignDomain::Checkpoint, s.signedPayload());
+        return s;
+    }
+
     SignedCommand signCommand(std::uint64_t seq, Action action, const std::string& atmId, const std::string& params = "") const
     {
         SignedCommand c;

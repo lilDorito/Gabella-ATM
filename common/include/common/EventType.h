@@ -31,7 +31,10 @@ enum class EventType
     TX_UNCERTAIN,
     AUDIT_ACCESS,
     LOG_STARTED,
-    LOG_INTEGRITY_FAILURE
+    LOG_INTEGRITY_FAILURE,
+    CHECKPOINT_ACCEPTED,
+    CHECKPOINT_REJECTED,
+    LOG_ROLLBACK_DETECTED
 };
 
 const char* eventTypeToString(EventType t);

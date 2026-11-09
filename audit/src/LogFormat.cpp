@@ -11,7 +11,7 @@ const char* const kTornEntryMarker = "reason=TornTail ";
 
 namespace
 {
-constexpr std::size_t kFieldCount = 12;
+constexpr std::size_t kFieldCount = 13;
 
 std::string escapeField(const std::string& in)
 {
@@ -118,6 +118,7 @@ std::string serializeEntry(std::uint64_t seq, std::int64_t ts, const LogEvent& e
     out += sep + escapeField(e.maskedPan);
     out += sep + (e.amount ? std::to_string(e.amount->kop()) : std::string());
     out += sep + escapeField(e.details);
+    out += sep + escapeField(e.opId);
     return out;
 }
 
@@ -167,10 +168,11 @@ std::optional<LogEntry> parseEntry(const std::string& line)
         if (!e.amount) return std::nullopt;
     }
     e.details = f[9];
+    e.opId = f[10];
 
-    if (!isHashHex(f[10]) || !isHashHex(f[11])) return std::nullopt;
+    if (!isHashHex(f[11]) || !isHashHex(f[12])) return std::nullopt;
 
-    LogEntry entry(*seq, *ts, std::move(e), f[10], f[11]);
+    LogEntry entry(*seq, *ts, std::move(e), f[11], f[12]);
     if (formatEntryLine(entry) != line) return std::nullopt;
     return entry;
 }

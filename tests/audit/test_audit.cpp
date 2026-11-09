@@ -389,12 +389,12 @@ void testHsmIntegration(HsmFixture& fx)
     Checkpoint cp = rig.sink.items().back();
 
     BankHsmAuditSigner bankSigner(*fx.bank);
-    check(verifyCheckpointMac(cp, bankSigner), "BankHsm accepts ATM checkpoint MAC");
-    check(fx.bank->verifyAudit(checkpointPayload(cp), cp.mac), "BankHsm::verifyAudit on payload works directly");
+    check(fx.bank->verifyAudit(checkpointPayload(cp), cp.mac), "BankHsm accepts the ATM checkpoint under the ATM's audit key");
+    check(!verifyCheckpointMac(cp, bankSigner), "the server log's key does not accept ATM checkpoints");
 
     Checkpoint moved = cp;
     moved.logId = "ATM-002";
-    check(!verifyCheckpointMac(moved, bankSigner), "checkpoint bound to its log id");
+    check(!fx.bank->verifyAudit(checkpointPayload(moved), moved.mac), "checkpoint bound to its log id");
 
     InMemoryLogStorage serverStorage;
     InMemoryAnchorStore serverAnchors;
@@ -404,6 +404,8 @@ void testHsmIntegration(HsmFixture& fx)
     check(serverLog.init() == LoggerState::Ready, "server logger uses BankHsm signer");
     for (int i = 0; i < 4; ++i) (void)serverLog.record(sampleEvent(i));
     check(serverSink.items().size() == 1 && verifyCheckpointMac(serverSink.items()[0], bankSigner), "server checkpoints MACed by BankHsm");
+    check(!verifyCheckpointMac(serverSink.items()[0], rig.signer), "an ATM's audit key does not accept server checkpoints");
+    check(!fx.bank->verifyAudit(checkpointPayload(serverSink.items()[0]), serverSink.items()[0].mac), "the server log key is separate from the ATM audit key");
 
     HsmFixture tamperFx;
     Rig tamperRig(*tamperFx.atm);
@@ -471,6 +473,46 @@ void testFiles(HsmFixture& fx)
     std::filesystem::remove_all(dir, ec);
 }
 
+void testIntents(HsmFixture& fx)
+{
+    section("Operation IDs, intents and trusted checkpoints");
+
+    LogEvent tagged = sampleEvent(1);
+    tagged.opId = "op|7\\x";
+    const auto back = parseEntry(formatEntryLine(LogEntry(1, 100, tagged, genesisHash(), computeEntryHash(genesisHash(), serializeEntry(1, 100, tagged)))));
+    check(back && back->getEvent().opId == tagged.opId, "opId survives serialization, including separators");
+    LogEvent rollback = sampleEvent(2);
+    rollback.type = EventType::LOG_ROLLBACK_DETECTED;
+    const auto rolled = parseEntry(formatEntryLine(LogEntry(1, 100, rollback, genesisHash(), computeEntryHash(genesisHash(), serializeEntry(1, 100, rollback)))));
+    check(rolled && rolled->getEvent().type == EventType::LOG_ROLLBACK_DETECTED, "event types added after LOG_INTEGRITY_FAILURE parse back");
+
+    Rig rig(*fx.atm);
+    (void)rig.logger.init();
+    auto record = [&](const std::string& opId, Outcome outcome)
+    {
+        LogEvent e = sampleEvent(0);
+        e.opId = opId;
+        e.outcome = outcome;
+        return rig.logger.record(e);
+    };
+    check(record("op-a", Outcome::Info) && record("op-b", Outcome::Info) && record("op-a", Outcome::Success), "intent and result events are recorded");
+    check(record("op-c", Outcome::Info) && record("op-c", Outcome::Info) && record("op-d", Outcome::Info) && record("op-d", Outcome::Failure), "repeated intents and failed results are recorded");
+    check(rig.fill(2), "events without an opId are recorded");
+
+    LogVerifier verifier(rig.storage, rig.signer);
+    const auto open = verifier.openIntents();
+    check(open.size() == 2 && open[0].getEvent().opId == "op-b" && open[1].getEvent().opId == "op-c", "openIntents returns intents without a result, oldest first");
+    check(open[1].getSeqNo() == 5, "a repeated intent is reported at its first occurrence");
+
+    check(rig.logger.sealCheckpoint() && !rig.sink.items().empty(), "checkpoint sealed");
+    Checkpoint cp = rig.sink.items().back();
+    cp.mac = "not-a-mac";
+    check(!verifier.verifyAgainstCheckpoint(cp).ok, "verifyAgainstCheckpoint still demands the MAC");
+    check(verifier.matchCheckpoint(cp).ok, "matchCheckpoint compares sequence and hash only, for a checkpoint already trusted");
+    cp.hash = std::string(64, 'f');
+    check(verifier.matchCheckpoint(cp).reason == VerifyError::CheckpointHashMismatch, "matchCheckpoint still catches a different hash");
+}
+
 void testConcurrency(HsmFixture& fx)
 {
     section("Concurrent writers");
@@ -511,6 +553,7 @@ int main()
     testInit(fx);
     testHsmIntegration(fx);
     testFiles(fx);
+    testIntents(fx);
     testConcurrency(fx);
 
     return gabella_test::summary();

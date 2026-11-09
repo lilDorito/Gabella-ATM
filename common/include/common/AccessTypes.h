@@ -27,6 +27,8 @@ struct AccessRequest
     std::string staffToken;
     Action action = Action::CheckBalance;
     std::string params;
+
+    std::string payload() const;
 };
 
 struct Decision

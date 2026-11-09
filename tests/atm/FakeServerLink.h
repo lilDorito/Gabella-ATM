@@ -18,6 +18,8 @@ public:
     std::function<void()> beforeReply;
     std::function<void(AuthResponse&)> alterInTransit;
     std::optional<Checkpoint> checkpoint;
+    std::optional<SignedCheckpoint> cannedCheckpoint;
+    std::vector<std::string> checkpointNonces;
     std::vector<SignedCommand> queuedCommands;
     std::vector<DispenseReport> reports;
     std::vector<StatusReport> statusReports;
@@ -76,5 +78,11 @@ public:
 
     void staffLogout(const std::string& token) override { loggedOut.push_back(token); }
     void reportTamper() override { tamperReported = true; }
-    std::optional<Checkpoint> latestCheckpoint() override { return checkpoint; }
+    std::optional<SignedCheckpoint> latestCheckpoint(const std::string&, const std::string& nonce) override
+    {
+        checkpointNonces.push_back(nonce);
+        if (cannedCheckpoint) return cannedCheckpoint;
+        if (!checkpoint) return std::nullopt;
+        return _bank.signCheckpoint(*checkpoint, nonce);
+    }
 };

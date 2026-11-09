@@ -9,4 +9,6 @@ struct Checkpoint
     std::string hash;
     std::int64_t timestamp = 0;
     std::string mac;
+
+    std::string payload() const;
 };

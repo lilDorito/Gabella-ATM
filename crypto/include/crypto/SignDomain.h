@@ -3,7 +3,8 @@ enum class SignDomain
 {
     Response,
     Dispense,
-    Command
+    Command,
+    Checkpoint
 };
 
 inline const char* tagOf(SignDomain domain)
@@ -13,6 +14,7 @@ inline const char* tagOf(SignDomain domain)
     case SignDomain::Response: return "RESP:";
     case SignDomain::Dispense: return "DISP:";
     case SignDomain::Command: return "CMD:";
+    case SignDomain::Checkpoint: return "CKPT:";
     }
     return "";
 }

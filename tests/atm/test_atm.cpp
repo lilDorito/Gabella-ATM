@@ -751,7 +751,8 @@ void auditorTests()
 
     r.type({ "AU-01", kPassword.c_str(), "1", "2", "1", "3", "0" });
     r.atm.runServiceMenu();
-    check(r.detailShown("Log intact"), "intact log is reported as intact");
+    check(r.detailShown("Log intact") && r.detailShown("confirmed by the server checkpoint"), "intact log is reported as intact and confirmed");
+    check(r.link.checkpointNonces.size() == 1 && r.link.checkpointNonces[0].size() == 16, "the auditor's request carries a fresh nonce");
     check(r.detailShown("CARD_INSERTED"), "entry range is displayed");
     check(r.has(EventType::AUDIT_ACCESS), "auditor access is logged");
 
@@ -778,6 +779,36 @@ void auditorTests()
     truncated.type({ "AU-01", kPassword.c_str(), "1", "0" });
     truncated.atm.runServiceMenu();
     check(truncated.detailShown("Log damaged"), "truncated log is detected through the server checkpoint");
+
+    Rig replay;
+    replay.insert();
+    replay.type({ "1", kPin.c_str() });
+    replay.atm.runSession();
+    const Checkpoint early = replay.checkpoints.items().back();
+    replay.insert();
+    replay.type({ "1", kPin.c_str() });
+    replay.atm.runSession();
+    replay.link.cannedCheckpoint = replay.bank.signCheckpoint(early, "an-older-nonce01");
+    replay.type({ "AU-01", kPassword.c_str(), "1", "0" });
+    replay.atm.runServiceMenu();
+    check(replay.detailShown("could not be verified") && !replay.detailShown("Log intact"), "an old signed checkpoint replayed with another nonce is refused, even over an intact chain");
+    check(replay.has(EventType::AUDIT_ACCESS), "the refused checkpoint is logged");
+
+    Rig foreign;
+    foreign.insert();
+    foreign.type({ "1", kPin.c_str() });
+    foreign.atm.runSession();
+    Checkpoint other = foreign.checkpoints.items().back();
+    other.logId = "ATM-999";
+    foreign.link.checkpoint = other;
+    foreign.type({ "AU-01", kPassword.c_str(), "1", "0" });
+    foreign.atm.runServiceMenu();
+    check(foreign.detailShown("could not be verified"), "a checkpoint signed for another ATM is refused");
+
+    Rig none;
+    none.type({ "AU-01", kPassword.c_str(), "1", "0" });
+    none.atm.runServiceMenu();
+    check(none.detailShown("Log intact") && none.detailShown("no server checkpoint to compare"), "without a server checkpoint the auditor is told only the chain was checked");
 
     Rig denied;
     denied.type({ "E-01", kPassword.c_str(), "1", "0" });

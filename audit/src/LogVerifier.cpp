@@ -1,5 +1,7 @@
 #include "audit/LogVerifier.h"
 
+#include <algorithm>
+#include <map>
 #include <string>
 
 #include "audit/CheckpointPayload.h"
@@ -93,7 +95,12 @@ VerifyResult LogVerifier::verifyAgainstCheckpoint(const Checkpoint& cp) const
         fail(r, VerifyError::CheckpointBadMac, cp.seqNo);
         return r;
     }
+    return matchCheckpoint(cp);
+}
 
+VerifyResult LogVerifier::matchCheckpoint(const Checkpoint& cp) const
+{
+    VerifyResult r;
     for (const std::string& line : _storage.readAll())
     {
         auto entry = parseEntry(line);
@@ -108,6 +115,34 @@ VerifyResult LogVerifier::verifyAgainstCheckpoint(const Checkpoint& cp) const
 
     fail(r, VerifyError::CheckpointMissingEntry, cp.seqNo);
     return r;
+}
+
+std::vector<LogEntry> LogVerifier::openIntents() const
+{
+    std::vector<LogEntry> intents;
+    std::map<std::string, std::size_t> open;
+    for (const std::string& line : _storage.readAll())
+    {
+        auto entry = parseEntry(line);
+        if (!entry || entry->getEvent().opId.empty()) continue;
+
+        const std::string& opId = entry->getEvent().opId;
+        if (entry->getEvent().outcome == Outcome::Info)
+        {
+            if (open.count(opId) == 0)
+            {
+                open[opId] = intents.size();
+                intents.push_back(std::move(*entry));
+            }
+            continue;
+        }
+        open.erase(opId);
+    }
+
+    std::vector<LogEntry> out;
+    for (const auto& [opId, index] : open) out.push_back(intents[index]);
+    std::sort(out.begin(), out.end(), [](const LogEntry& a, const LogEntry& b) { return a.getSeqNo() < b.getSeqNo(); });
+    return out;
 }
 
 std::vector<LogEntry> LogVerifier::readEntries(std::uint64_t from, std::uint64_t to) const

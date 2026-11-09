@@ -19,5 +19,7 @@ public:
 
     VerifyResult verifyChain() const;
     VerifyResult verifyAgainstCheckpoint(const Checkpoint& cp) const;
+    VerifyResult matchCheckpoint(const Checkpoint& cp) const;
+    std::vector<LogEntry> openIntents() const;
     std::vector<LogEntry> readEntries(std::uint64_t from, std::uint64_t to) const;
 };

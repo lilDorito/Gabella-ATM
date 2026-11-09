@@ -706,15 +706,29 @@ void AtmController::auditorMenu(const std::string& token)
 
             const VerifyResult chain = _verifier.verifyChain();
             VerifyResult result = chain;
+            bool confirmed = false;
             if (chain.ok)
             {
-                const auto checkpoint = _link.latestCheckpoint();
-                if (checkpoint) result = _verifier.verifyAgainstCheckpoint(*checkpoint);
+                const auto nonce = _hsm.generateNonce();
+                const auto reply = nonce ? _link.latestCheckpoint(token, *nonce) : std::nullopt;
+                if (reply)
+                {
+                    const bool fresh = reply->requestNonce == *nonce && reply->checkpoint.logId == _atmId;
+                    if (!fresh || !_hsm.verifyServer(SignDomain::Checkpoint, reply->signedPayload(), reply->signature))
+                    {
+                        logQuiet(EventType::AUDIT_ACCESS, Outcome::Failure, "action=VerifyLog reason=checkpoint_unverified", 0, Role::Auditor);
+                        _display.show(ScreenId::ServiceMenu, "Log could not be verified: the server checkpoint failed its signature check");
+                        continue;
+                    }
+                    result = _verifier.verifyAgainstCheckpoint(reply->checkpoint);
+                    confirmed = true;
+                }
             }
 
             if (result.ok)
             {
-                _display.show(ScreenId::ServiceMenu, "Log intact, entries: " + std::to_string(chain.entryCount));
+                const std::string source = confirmed ? "; confirmed by the server checkpoint" : "; no server checkpoint to compare";
+                _display.show(ScreenId::ServiceMenu, "Log intact, entries: " + std::to_string(chain.entryCount) + source);
             }
             else
             {

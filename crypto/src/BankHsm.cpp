@@ -1,6 +1,7 @@
 #include "crypto/BankHsm.h"
 
 #include <stdexcept>
+#include <utility>
 
 #include "common/Canonical.h"
 #include "crypto/KeyWrap.h"
@@ -28,6 +29,9 @@ BankHsm::BankHsm(const std::string& masterKey,
     if (encKey.size() != 16) throw std::invalid_argument("bank hsm: encKey must be 16 bytes");
     if (macKey.size() != 16) throw std::invalid_argument("bank hsm: macKey must be 16 bytes");
     if (auditKey.size() != 16) throw std::invalid_argument("bank hsm: auditKey must be 16 bytes");
+    auto serverAuditKey = CryptoCore::hmacSha256(_masterKey, "SERVER-AUDIT-KEY");
+    if (!serverAuditKey) throw std::runtime_error("bank hsm: server audit key derivation failed");
+    _serverAuditKey = std::move(*serverAuditKey);
     if (pinKey.size() != 16) throw std::invalid_argument("bank hsm: pinKey must be 16 bytes");
 }
 
@@ -38,6 +42,7 @@ void BankHsm::wipeKeys()
     CryptoCore::cleanse(_masterKey);
     CryptoCore::cleanse(_encKey);
     CryptoCore::cleanse(_macKey);
+    CryptoCore::cleanse(_serverAuditKey);
     CryptoCore::cleanse(_auditKey);
     CryptoCore::cleanse(_pinKey);
     CryptoCore::cleanse(_signSecret.data(), _signSecret.size());
@@ -104,6 +109,8 @@ bool BankHsm::extractPin(const std::string& pinBlock, const std::string& pan, st
 bool BankHsm::verifyMessage(const std::string& data, const std::string& mac) const { return CryptoCore::hmacVerify(_macKey, data, mac); }
 bool BankHsm::verifyAudit(const std::string& data, const std::string& mac) const { return CryptoCore::hmacVerify(_auditKey, "AUDIT:" + data, mac); }
 std::optional<std::string> BankHsm::macAudit(const std::string& data) const { return CryptoCore::hmacSha256(_auditKey, "AUDIT:" + data); }
+bool BankHsm::verifyServerAudit(const std::string& data, const std::string& mac) const { return CryptoCore::hmacVerify(_serverAuditKey, "AUDIT:" + data, mac); }
+std::optional<std::string> BankHsm::macServerAudit(const std::string& data) const { return CryptoCore::hmacSha256(_serverAuditKey, "AUDIT:" + data); }
 
 std::optional<std::string> BankHsm::sign(SignDomain domain, const std::string& data) const
 {
