@@ -14,6 +14,7 @@ bool allDigits(const std::string& s)
 
 bool KeypadEmulator::readHiddenPin(std::string& out)
 {
+    notifyRead();
     if (!_enabled || !_input.nextInto(out))
     {
         CryptoCore::cleanse(out);
@@ -30,6 +31,7 @@ bool KeypadEmulator::readHiddenPin(std::string& out)
 
 bool KeypadEmulator::readHiddenSecret(std::string& out)
 {
+    notifyRead();
     if (!_enabled || !_input.nextInto(out) || out.empty())
     {
         CryptoCore::cleanse(out);
@@ -40,6 +42,7 @@ bool KeypadEmulator::readHiddenSecret(std::string& out)
 
 std::optional<Action> KeypadEmulator::readAction()
 {
+    notifyRead();
     std::string s;
     if (!_enabled || !_input.nextInto(s)) return std::nullopt;
     if (s == "1" || s == "balance") return Action::CheckBalance;
@@ -49,6 +52,7 @@ std::optional<Action> KeypadEmulator::readAction()
 
 std::optional<Money> KeypadEmulator::readAmount()
 {
+    notifyRead();
     std::string s;
     if (!_enabled || !_input.nextInto(s)) return std::nullopt;
     if (s.size() > 12 || !allDigits(s)) return std::nullopt;
@@ -58,6 +62,7 @@ std::optional<Money> KeypadEmulator::readAmount()
 
 std::optional<std::string> KeypadEmulator::readText()
 {
+    notifyRead();
     std::string s;
     if (!_enabled || !_input.nextInto(s)) return std::nullopt;
     return s;

@@ -1,8 +1,14 @@
 #pragma once
+#include <optional>
 #include <string>
 
 #include "atm/CardReaderEmulator.h"
 #include "atm/DispenserEmulator.h"
+#include "atm/IServerLink.h"
+#include "audit/LogStorage.h"
+#include "audit/LogVerifier.h"
+#include "common/AuthRequest.h"
+#include "common/Checkpoint.h"
 
 struct AttackReport
 {
@@ -35,4 +41,6 @@ public:
     AttackReport runJackpotting();
     AttackReport runSkimmer();
     AttackReport runStepSkipping();
+    AttackReport runReplay(IServerLink& link, const AuthRequest& captured);
+    AttackReport runLogTampering(InMemoryLogStorage& storage, const LogVerifier& verifier, const std::optional<Checkpoint>& checkpoint);
 };

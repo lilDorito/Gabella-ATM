@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,16 @@ long cashTotal(const std::map<int, int>& notes)
     long total = 0;
     for (const auto& [value, count] : notes) total += static_cast<long>(value) * count;
     return total;
+}
+
+std::size_t countReason(const FakeServerLink& link, StatusReason reason)
+{
+    std::size_t n = 0;
+    for (const StatusReport& r : link.statusReports)
+    {
+        if (r.reason == reason) ++n;
+    }
+    return n;
 }
 
 struct Rig
@@ -722,7 +733,8 @@ void serviceMenuTests()
     lost.link.statusAccepted = true;
     lost.atm.runSession();
     const auto& resent = lost.link.statusReports;
-    check(resent.size() == 1 && resent[0].reason == StatusReason::CashLoaded && cashTotal(resent[0].cassetteCounts) == lost.cash(), "the stored report is delivered first");
+    check(resent.size() == 2 && resent[0].reason == StatusReason::CashLoaded && cashTotal(resent[0].cassetteCounts) == lost.cash() && resent[1].reason == StatusReason::Reconnect,
+        "the stored report is delivered first, then the Reconnect report");
     check(lost.detailShown("12340.00"), "then the waiting customer is served");
 
     Rig both;
@@ -736,7 +748,8 @@ void serviceMenuTests()
     both.type({ "1", kPin.c_str() });
     both.atm.runSession();
     const auto& ordered = both.link.statusReports;
-    check(ordered.size() == 2 && ordered[0].reason == StatusReason::CashLoaded && ordered[1].reason == StatusReason::CashCollected, "queued reports are delivered in the order they happened");
+    check(ordered.size() == 3 && ordered[0].reason == StatusReason::CashLoaded && ordered[1].reason == StatusReason::CashCollected && ordered[2].reason == StatusReason::Reconnect,
+        "queued reports are delivered in the order they happened, then the Reconnect report");
 }
 
 void auditorTests()
@@ -817,6 +830,279 @@ void auditorTests()
 }
 }
 
+std::size_t diagnosticsShown(const Rig& r)
+{
+    std::size_t n = 0;
+    for (const std::string& d : r.display.details())
+    {
+        if (d.find("HSM:") != std::string::npos) ++n;
+    }
+    return n;
+}
+
+void reconnectTests()
+{
+    section("Reconnect status report");
+
+    Rig boot;
+    boot.atm.runSession();
+    check(countReason(boot.link, StatusReason::Reconnect) == 1, "the first contact after start sends a Reconnect report");
+    check(boot.link.statusReports[0].lastExecutedSequence == 0 && cashTotal(boot.link.statusReports[0].cassetteCounts) == boot.cash(),
+        "the report carries the last dispense sequence and the cassette counters");
+    boot.atm.runSession();
+    check(countReason(boot.link, StatusReason::Reconnect) == 1, "an idle ATM does not repeat the report");
+
+    Rig offline;
+    offline.link.online = false;
+    offline.atm.runSession();
+    check(offline.link.statusReports.empty(), "nothing is delivered while the server is unreachable");
+    offline.link.online = true;
+    offline.atm.runSession();
+    check(countReason(offline.link, StatusReason::Reconnect) == 1, "the report is delivered as soon as the link is back");
+
+    Rig refused;
+    refused.link.statusAccepted = false;
+    refused.insert();
+    refused.type({ "1", kPin.c_str() });
+    refused.atm.runSession();
+    check(refused.detailShown("12340.00"), "a refused Reconnect report does not block the customer");
+
+    Rig clean;
+    clean.insert();
+    clean.type({ "2", "500", kPin.c_str() });
+    clean.atm.runSession();
+    clean.atm.runSession();
+    check(clean.cash() == 90000 - 500 && countReason(clean.link, StatusReason::Reconnect) == 1, "a reported withdrawal does not trigger another Reconnect");
+
+    Rig lostReply;
+    lostReply.atm.runSession();
+    lostReply.link.alterInTransit = [](AuthResponse& r) { r.sessionId = "damaged-in-transit"; };
+    lostReply.insert();
+    lostReply.type({ "2", "500", kPin.c_str() });
+    lostReply.atm.runSession();
+    check(lostReply.cash() == 90000 && countReason(lostReply.link, StatusReason::Reconnect) == 1, "a withdrawal whose answer was lost dispenses nothing");
+    lostReply.link.alterInTransit = nullptr;
+    lostReply.atm.runSession();
+    const StatusReport& afterLoss = lostReply.link.statusReports.back();
+    check(countReason(lostReply.link, StatusReason::Reconnect) == 2 && afterLoss.lastExecutedSequence == 0 && cashTotal(afterLoss.cassetteCounts) == 90000,
+        "a lost answer is followed by a Reconnect report with the unchanged counters");
+
+    Rig blocked;
+    blocked.atm.runSession();
+    blocked.link.beforeReply = [&blocked] { blocked.storage.setFailAppends(true); };
+    blocked.insert();
+    blocked.type({ "2", "500", kPin.c_str() });
+    blocked.atm.runSession();
+    check(blocked.atm.currentState() == SessionState::OutOfService && blocked.cash() == 90000 && blocked.link.reports.empty(),
+        "the log failed after the server reserved the money: nothing dispensed and nothing reported");
+    blocked.link.beforeReply = nullptr;
+    blocked.link.queuedCommands.push_back(blocked.bank.signCommand(1, Action::RestoreFromOutOfService, kAtmId));
+    blocked.atm.runSession();
+    const StatusReport& afterRestore = blocked.link.statusReports.back();
+    check(blocked.atm.currentState() == SessionState::Idle && countReason(blocked.link, StatusReason::Reconnect) == 2 && afterRestore.lastExecutedSequence == 0
+            && cashTotal(afterRestore.cassetteCounts) == 90000,
+        "after recovery the unchanged counters let the server release the reserved money");
+}
+
+void pollingTests()
+{
+    section("Server commands are read by the session loop");
+
+    Rig r;
+    r.link.beforeReply = [&r] { r.storage.setFailAppends(true); };
+    r.insert();
+    r.type({ "2", "500", kPin.c_str() });
+    r.atm.runSession();
+    check(r.atm.currentState() == SessionState::OutOfService, "the ATM is out of service");
+
+    r.link.beforeReply = nullptr;
+    r.link.queuedCommands.push_back(r.bank.signCommand(1, Action::RestoreFromOutOfService, kAtmId));
+    r.atm.runSession();
+    check(r.atm.currentState() == SessionState::Idle && r.link.commandResults.size() == 1 && r.link.commandResults[0].second,
+        "an out-of-service ATM reads its commands without a card and returns to service");
+
+    Rig idle;
+    idle.link.queuedCommands.push_back(idle.bank.signCommand(1, Action::RestoreFromOutOfService, kAtmId));
+    idle.atm.runSession();
+    check(idle.link.commandResults.size() == 1 && idle.link.queuedCommands.empty(), "commands are read even when no card is inserted");
+}
+
+void exceptionTests()
+{
+    section("Unexpected failures");
+
+    Rig invariant;
+    invariant.link.beforeReply = [] { throw InvariantViolation("simulated invariant failure"); };
+    invariant.insert();
+    invariant.type({ "2", "500", kPin.c_str() });
+    invariant.atm.runSession();
+    check(invariant.atm.currentState() == SessionState::OutOfService && invariant.cash() == 90000, "an invariant violation takes the ATM out of service");
+    check(invariant.reader.status() == CardReaderEmulator::Status::Ejected && invariant.has(EventType::SESSION_ABORTED), "the card is returned and the failure is logged");
+
+    Rig unknown;
+    unknown.link.beforeReply = [] { throw std::runtime_error("simulated failure"); };
+    unknown.insert();
+    unknown.type({ "2", "500", kPin.c_str() });
+    unknown.atm.runSession();
+    check(unknown.atm.currentState() == SessionState::OutOfService && unknown.cash() == 90000, "an unknown exception takes the ATM out of service instead of escaping");
+    check(unknown.reader.status() == CardReaderEmulator::Status::Ejected && unknown.has(EventType::SESSION_ABORTED), "the card is returned and the failure is logged");
+
+    Rig menu;
+    menu.link.beforeLogin = [] { throw std::runtime_error("simulated failure"); };
+    menu.type({ "E-01", kPassword.c_str() });
+    menu.atm.runServiceMenu();
+    check(menu.atm.currentState() == SessionState::OutOfService, "a failure in the service menu is contained");
+
+    Rig poll;
+    poll.link.beforePoll = [] { throw std::runtime_error("simulated failure"); };
+    poll.atm.processServerCommands();
+    check(poll.atm.currentState() == SessionState::OutOfService, "a failure while reading server commands is contained");
+
+    Rig tamper;
+    tamper.link.onTamperReport = [] { throw std::runtime_error("simulated failure"); };
+    tamper.tamper.trigger();
+    check(tamper.fx.atm->isDestroyed() && tamper.atm.currentState() == SessionState::OutOfService, "tamper wipes the keys even if telling the server fails");
+    check(tamper.dispenser.dispense(tamper.bank.signDispense(kAtmId, 10000, 1)) == DispenseResult::Locked, "the dispenser is locked even if telling the server fails");
+}
+
+void diagnosticsTests()
+{
+    section("Diagnostics");
+
+    Rig ok;
+    ok.type({ "E-01", kPassword.c_str(), "2", "0" });
+    ok.atm.runServiceMenu();
+    check(ok.detailShown("HSM: Operational") && ok.detailShown("cassettes:"), "diagnostics still report the HSM and the cassettes");
+    check(ok.detailShown("log: Ready") && ok.detailShown("link: connected") && ok.detailShown("dispense_seq: 0"), "diagnostics report the log, the link and the dispense counter");
+    check(ok.detailShown("sync_pending: yes"), "diagnostics show that the Reconnect report is still due");
+
+    Rig synced;
+    synced.atm.runSession();
+    synced.type({ "E-01", kPassword.c_str(), "2", "0" });
+    synced.atm.runServiceMenu();
+    check(synced.detailShown("sync_pending: no"), "diagnostics show that the Reconnect report was delivered");
+
+    Rig down;
+    down.link.pendingFlushed = false;
+    down.type({ "E-01", kPassword.c_str(), "2", "0" });
+    down.atm.runServiceMenu();
+    check(down.detailShown("link: unreachable"), "diagnostics report an unreachable server");
+
+    Rig broken;
+    broken.storage.setFailAppends(true);
+    broken.type({ "E-01", kPassword.c_str(), "2", "0" });
+    broken.atm.runServiceMenu();
+    check(broken.detailShown("log: Failed"), "diagnostics report a failed log");
+}
+
+void staffSessionTests()
+{
+    section("Staff session lifetime");
+
+    Rig idle;
+    int idleReads = 0;
+    idle.keypad.onBeforeRead(
+        [&]
+        {
+            if (++idleReads == 3) idle.clock.advance(901);
+        });
+    idle.type({ "E-01", kPassword.c_str(), "2", "0" });
+    idle.atm.runServiceMenu();
+    check(diagnosticsShown(idle) == 0 && idle.detailShown("Staff session expired"), "a menu choice after 15 minutes of silence is discarded");
+    check(idle.link.loggedOut.size() == 1 && idle.has(EventType::ACCESS_DENIED), "the expired session is logged out and recorded");
+
+    Rig edge;
+    int edgeReads = 0;
+    edge.keypad.onBeforeRead(
+        [&]
+        {
+            if (++edgeReads == 3) edge.clock.advance(900);
+        });
+    edge.type({ "E-01", kPassword.c_str(), "2", "0" });
+    edge.atm.runServiceMenu();
+    check(diagnosticsShown(edge) == 1, "exactly 15 minutes is still within the limit");
+
+    Rig active;
+    int activeReads = 0;
+    active.keypad.onBeforeRead(
+        [&]
+        {
+            if (++activeReads > 2) active.clock.advance(600);
+        });
+    active.type({ "E-01", kPassword.c_str(), "2", "2", "0" });
+    active.atm.runServiceMenu();
+    check(diagnosticsShown(active) == 2 && !active.detailShown("Staff session expired"), "activity keeps the session alive across prompts ten minutes apart");
+
+    Rig shift;
+    int shiftReads = 0;
+    shift.keypad.onBeforeRead(
+        [&]
+        {
+            if (++shiftReads > 2) shift.clock.advance(800);
+        });
+    shift.type({ "E-01", kPassword.c_str() });
+    for (int i = 0; i < 40; ++i) shift.type({ "2" });
+    shift.type({ "0" });
+    shift.atm.runServiceMenu();
+    check(diagnosticsShown(shift) == 36 && shift.detailShown("Staff session expired"), "a session ends after eight hours even if the staff member keeps working");
+    check(shift.link.loggedOut.size() == 1, "the token is revoked when the shift limit ends the session");
+
+    Rig collector;
+    int collectorReads = 0;
+    collector.keypad.onBeforeRead(
+        [&]
+        {
+            if (++collectorReads == 3) collector.clock.advance(901);
+        });
+    collector.type({ "C-01", kPassword.c_str(), "1", "1", "1", "1", "1", "0" });
+    collector.atm.runServiceMenu();
+    check(collector.link.statusReports.empty() && collector.detailShown("Staff session expired"), "the cash collector menu closes after 15 minutes too");
+
+    Rig auditor;
+    int auditorReads = 0;
+    auditor.keypad.onBeforeRead(
+        [&]
+        {
+            if (++auditorReads == 3) auditor.clock.advance(901);
+        });
+    auditor.type({ "AU-01", kPassword.c_str(), "1", "0" });
+    auditor.atm.runServiceMenu();
+    check(auditor.detailShown("Staff session expired") && !auditor.detailShown("Log intact"), "the auditor menu closes after 15 minutes too");
+}
+
+void scenarioTests()
+{
+    section("Replay and log tampering scenarios");
+
+    Rig r;
+    r.insert();
+    r.type({ "2", "500", kPin.c_str() });
+    r.atm.runSession();
+    const std::int64_t balanceBefore = r.bank.balanceKop;
+    const AuthRequest captured = r.bank.seen.back();
+
+    AttackScenarios attacks(r.dispenser, r.reader, kAtmId);
+    const AttackReport replayed = attacks.runReplay(r.link, captured);
+    check(replayed.passed, "replay of a captured request is refused: " + replayed.details);
+    check(r.bank.balanceKop == balanceBefore, "the replay did not move any money");
+
+    std::optional<Checkpoint> checkpoint;
+    if (!r.checkpoints.items().empty()) checkpoint = r.checkpoints.items().back();
+    check(checkpoint.has_value(), "the finished session left a checkpoint");
+
+    const AttackReport anchored = attacks.runLogTampering(r.storage, r.verifier, checkpoint);
+    check(anchored.passed, "log edits, deletions, truncation and rewrites are detected: " + anchored.details);
+    check(r.verifier.verifyChain().ok, "the scenario leaves the log as it found it");
+
+    const AttackReport unanchored = attacks.runLogTampering(r.storage, r.verifier, std::nullopt);
+    check(unanchored.passed && unanchored.details.find("truncate=skipped") != std::string::npos, "without a checkpoint only edits and deletions are judged: " + unanchored.details);
+
+    Rig tiny;
+    AttackScenarios emptyAttacks(tiny.dispenser, tiny.reader, kAtmId);
+    tiny.storage.lines().resize(1);
+    check(!emptyAttacks.runLogTampering(tiny.storage, tiny.verifier, std::nullopt).passed, "a log that is too short is not reported as defended");
+}
+
 int main()
 {
     gabella_test::banner("ATM test suite");
@@ -838,6 +1124,14 @@ int main()
     commandTests();
     serviceMenuTests();
     auditorTests();
+    serviceMenuTests();
+    auditorTests();
+    reconnectTests();
+    pollingTests();
+    exceptionTests();
+    diagnosticsTests();
+    staffSessionTests();
+    scenarioTests();
 
     return gabella_test::summary();
 }

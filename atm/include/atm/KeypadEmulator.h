@@ -1,4 +1,6 @@
 #pragma once
+#include <functional>
+
 #include "atm/IKeypad.h"
 #include "atm/InputSource.h"
 
@@ -7,6 +9,12 @@ class KeypadEmulator final : public IKeypad
 private:
     InputSource& _input;
     bool _enabled = true;
+    std::function<void()> _beforeRead;
+
+    void notifyRead()
+    {
+        if (_beforeRead) _beforeRead();
+    }
 
 public:
     explicit KeypadEmulator(InputSource& input) : _input(input) {}
@@ -18,4 +26,6 @@ public:
     std::optional<std::string> readText() override;
     void enable() override { _enabled = true; }
     void disable() override { _enabled = false; }
+
+    void onBeforeRead(std::function<void()> hook) { _beforeRead = std::move(hook); }
 };

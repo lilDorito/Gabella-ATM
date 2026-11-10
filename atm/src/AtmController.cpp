@@ -16,6 +16,8 @@ constexpr std::int64_t kMaxWithdrawKop = 10000LL * 100;
 constexpr std::int64_t kStepKop = 100LL * 100;
 constexpr int kMaxPinRounds = 5;
 constexpr std::size_t kMaxEntriesShown = 20;
+constexpr std::int64_t kStaffIdleSeconds = 15 * 60;
+constexpr std::int64_t kStaffMaxSessionSeconds = 8 * 60 * 60;
 const int kDenominations[] = { 100, 200, 500, 1000 };
 
 std::string newSessionId()
@@ -136,6 +138,8 @@ void AtmController::step(SessionState to)
 
 void AtmController::runSession()
 {
+    processServerCommands();
+
     if (_outOfService)
     {
         _display.show(ScreenId::OutOfService);
@@ -153,6 +157,8 @@ void AtmController::runSession()
         }
         logQuiet(EventType::AUDIT_ACCESS, Outcome::Success, "status_reports_resent=" + std::to_string(waiting), 0, Role::System);
     }
+
+    if (_syncPending) (void)syncReconnect();
 
     auto card = _reader.readCard();
     if (!card) return;
@@ -174,6 +180,14 @@ void AtmController::runSession()
     {
         logQuiet(EventType::SESSION_ABORTED, Outcome::Failure, "reason=invariant_violation message=" + quoted(e.what()));
         enterOutOfService(false, "invariant_violation");
+    }
+    catch (const std::exception&)
+    {
+        failSafe("unexpected_exception");
+    }
+    catch (...)
+    {
+        failSafe("unexpected_exception");
     }
 
     if (_session) endSession();
@@ -266,6 +280,7 @@ void AtmController::sessionFlow(const Card& cardIn)
 
         if (!response || response->sessionId != _session->getId())
         {
+            _syncPending = true;
             logQuiet(EventType::AUTH_RESULT, Outcome::Failure, "reason=no_valid_response");
             terminate(ScreenId::Error, "server_unavailable");
             return;
@@ -313,6 +328,7 @@ void AtmController::sessionFlow(const Card& cardIn)
 
     logQuiet(EventType::AUTH_RESULT, Outcome::Success, "status=Approved", _session->getAmountKop());
     step(SessionState::Approved);
+    if (*_session->getAction() == Action::Withdraw) _holdOpen = true;
 
     if (*_session->getAction() == Action::CheckBalance)
     {
@@ -358,6 +374,7 @@ void AtmController::sessionFlow(const Card& cardIn)
     report.cassetteCounts = _dispenser.cassetteCounts();
     report.timestamp = _clock.nowUnix();
     _link.reportDispense(report);
+    _holdOpen = false;
 
     if (result == DispenseResult::Ok)
     {
@@ -395,6 +412,12 @@ void AtmController::enterOutOfService(bool retainCard, const std::string& reason
 void AtmController::endSession()
 {
     if (!_session) return;
+
+    if (_holdOpen)
+    {
+        _syncPending = true;
+        _holdOpen = false;
+    }
 
     const std::string sessionId = _session->getId();
 
@@ -441,14 +464,80 @@ void AtmController::endSession()
 void AtmController::onTamperDetected()
 {
     _dispenser.lock();
-    logQuiet(EventType::TAMPER_DETECTED, Outcome::Failure, "source=tamper_sensor", 0, Role::System);
+    try
+    {
+        logQuiet(EventType::TAMPER_DETECTED, Outcome::Failure, "source=tamper_sensor", 0, Role::System);
+    }
+    catch (...)
+    {
+    }
     _hsm.reportTamper();
     _keypad.disable();
-    enterOutOfService(true, "tamper");
-    _link.reportTamper();
+    try
+    {
+        enterOutOfService(true, "tamper");
+    }
+    catch (...)
+    {
+        _outOfService = true;
+        _retainOnShutdown = true;
+    }
+    try
+    {
+        _link.reportTamper();
+    }
+    catch (...)
+    {
+    }
+}
+
+void AtmController::failSafe(const std::string& reason)
+{
+    try
+    {
+        logQuiet(EventType::SESSION_ABORTED, Outcome::Failure, "reason=" + reason);
+        enterOutOfService(false, reason);
+    }
+    catch (...)
+    {
+        _outOfService = true;
+    }
+}
+
+bool AtmController::syncReconnect()
+{
+    StatusReport report;
+    report.atmId = _atmId;
+    report.reason = StatusReason::Reconnect;
+    report.lastExecutedSequence = _dispenser.lastSequence();
+    report.cassetteCounts = _dispenser.cassetteCounts();
+    report.timestamp = _clock.nowUnix();
+
+    if (!_link.syncStatus(report)) return false;
+
+    _syncPending = false;
+    logQuiet(EventType::AUDIT_ACCESS, Outcome::Success, "action=Reconnect last_dispense_seq=" + std::to_string(report.lastExecutedSequence), 0, Role::System);
+    return true;
 }
 
 void AtmController::processServerCommands()
+{
+    try
+    {
+        commandsFlow();
+    }
+    catch (const InvariantViolation& e)
+    {
+        logQuiet(EventType::SESSION_ABORTED, Outcome::Failure, "reason=invariant_violation message=" + quoted(e.what()));
+        failSafe("invariant_violation");
+    }
+    catch (...)
+    {
+        failSafe("unexpected_exception");
+    }
+}
+
+void AtmController::commandsFlow()
 {
     for (const SignedCommand& command : _link.pollCommands())
     {
@@ -483,6 +572,7 @@ void AtmController::processServerCommands()
                 _keypad.enable();
                 _outOfService = false;
                 _retainOnShutdown = false;
+                _syncPending = true;
                 ok = true;
             }
             break;
@@ -570,6 +660,43 @@ std::optional<std::map<int, int>> AtmController::askCounts(const std::string& wh
 
 void AtmController::runServiceMenu()
 {
+    try
+    {
+        serviceMenuFlow();
+    }
+    catch (const InvariantViolation& e)
+    {
+        logQuiet(EventType::SESSION_ABORTED, Outcome::Failure, "reason=invariant_violation message=" + quoted(e.what()));
+        failSafe("invariant_violation");
+    }
+    catch (...)
+    {
+        failSafe("unexpected_exception");
+    }
+}
+
+bool AtmController::staffSessionLapsed(std::int64_t loginAt, std::int64_t promptAt) const
+{
+    const std::int64_t now = _clock.nowUnix();
+    return now - promptAt > kStaffIdleSeconds || now - loginAt > kStaffMaxSessionSeconds;
+}
+
+void AtmController::staffSessionExpired()
+{
+    logQuiet(EventType::ACCESS_DENIED, Outcome::Failure, "reason=staff_session_expired");
+    _display.show(ScreenId::ServiceMenu, "Staff session expired");
+}
+
+void AtmController::showDiagnostics()
+{
+    const bool linkUp = _link.flushPending();
+    _display.show(ScreenId::ServiceMenu,
+        std::string("HSM: ") + hsmStateName(_hsm.state()) + "; cassettes: " + describe(_dispenser.cassetteCounts()) + "; dispense_seq: " + std::to_string(_dispenser.lastSequence())
+            + "; log: " + loggerStateToString(_logger.state()) + "; link: " + (linkUp ? "connected" : "unreachable") + "; sync_pending: " + (_syncPending ? "yes" : "no"));
+}
+
+void AtmController::serviceMenuFlow()
+{
     if (_outOfService || _session)
     {
         _display.show(ScreenId::OutOfService);
@@ -623,24 +750,31 @@ void AtmController::runServiceMenu()
 
     logQuiet(EventType::STAFF_LOGIN, Outcome::Success, "", 0, login->role, *staffId);
 
+    const std::int64_t loginAt = _clock.nowUnix();
     switch (login->role)
     {
-    case Role::ServiceEngineer: engineerMenu(login->token); break;
-    case Role::CashCollector: collectorMenu(login->token); break;
-    case Role::Auditor: auditorMenu(login->token); break;
+    case Role::ServiceEngineer: engineerMenu(login->token, loginAt); break;
+    case Role::CashCollector: collectorMenu(login->token, loginAt); break;
+    case Role::Auditor: auditorMenu(login->token, loginAt); break;
     default: _display.show(ScreenId::AccessDenied); break;
     }
 
     _link.staffLogout(login->token);
 }
 
-void AtmController::engineerMenu(const std::string& token)
+void AtmController::engineerMenu(const std::string& token, std::int64_t loginAt)
 {
     for (;;)
     {
+        const std::int64_t promptAt = _clock.nowUnix();
         _display.show(ScreenId::ServiceMenu, "1 Load cassettes / 2 Diagnostics / 0 Exit");
         const auto choice = _keypad.readText();
         if (!choice || *choice == "0") return;
+        if (staffSessionLapsed(loginAt, promptAt))
+        {
+            staffSessionExpired();
+            return;
+        }
 
         if (*choice == "1" && allowed(token, Action::LoadCash))
         {
@@ -660,18 +794,24 @@ void AtmController::engineerMenu(const std::string& token)
         }
         else if (*choice == "2" && allowed(token, Action::RunDiagnostics))
         {
-            _display.show(ScreenId::ServiceMenu, std::string("HSM: ") + hsmStateName(_hsm.state()) + "; cassettes: " + describe(_dispenser.cassetteCounts()));
+            showDiagnostics();
         }
     }
 }
 
-void AtmController::collectorMenu(const std::string& token)
+void AtmController::collectorMenu(const std::string& token, std::int64_t loginAt)
 {
     for (;;)
     {
+        const std::int64_t promptAt = _clock.nowUnix();
         _display.show(ScreenId::ServiceMenu, "1 Collect cash / 0 Exit");
         const auto choice = _keypad.readText();
         if (!choice || *choice == "0") return;
+        if (staffSessionLapsed(loginAt, promptAt))
+        {
+            staffSessionExpired();
+            return;
+        }
 
         if (*choice == "1" && allowed(token, Action::CollectCash))
         {
@@ -692,13 +832,19 @@ void AtmController::collectorMenu(const std::string& token)
     }
 }
 
-void AtmController::auditorMenu(const std::string& token)
+void AtmController::auditorMenu(const std::string& token, std::int64_t loginAt)
 {
     for (;;)
     {
+        const std::int64_t promptAt = _clock.nowUnix();
         _display.show(ScreenId::ServiceMenu, "1 Verify log / 2 View entries / 0 Exit");
         const auto choice = _keypad.readText();
         if (!choice || *choice == "0") return;
+        if (staffSessionLapsed(loginAt, promptAt))
+        {
+            staffSessionExpired();
+            return;
+        }
 
         if (*choice == "1" && allowed(token, Action::VerifyLog))
         {

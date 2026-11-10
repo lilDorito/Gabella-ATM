@@ -15,6 +15,10 @@ private:
 public:
     bool online = true;
     bool statusAccepted = true;
+    bool pendingFlushed = true;
+    std::function<void()> beforeLogin;
+    std::function<void()> beforePoll;
+    std::function<void()> onTamperReport;
     std::function<void()> beforeReply;
     std::function<void(AuthResponse&)> alterInTransit;
     std::optional<Checkpoint> checkpoint;
@@ -49,10 +53,11 @@ public:
         _bank.onDispenseReport(report);
     }
 
-    bool flushPending() override { return true; }
+    bool flushPending() override { return pendingFlushed; }
 
     std::vector<SignedCommand> pollCommands() override
     {
+        if (beforePoll) beforePoll();
         std::vector<SignedCommand> out = std::move(queuedCommands);
         queuedCommands.clear();
         return out;
@@ -71,13 +76,18 @@ public:
 
     std::optional<StaffLoginResult> staffLogin(const StaffLoginRequest& request) override
     {
+        if (beforeLogin) beforeLogin();
         if (!online) return std::nullopt;
         loginRequests.push_back(request);
         return _bank.staffLogin(request);
     }
 
     void staffLogout(const std::string& token) override { loggedOut.push_back(token); }
-    void reportTamper() override { tamperReported = true; }
+    void reportTamper() override
+    {
+        if (onTamperReport) onTamperReport();
+        tamperReported = true;
+    }
     std::optional<SignedCheckpoint> latestCheckpoint(const std::string&, const std::string& nonce) override
     {
         checkpointNonces.push_back(nonce);
