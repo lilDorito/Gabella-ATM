@@ -34,3 +34,12 @@ gabella_test(test_server_core
 gabella_test(test_server_audit
     SOURCES server/test_server_audit.cpp
     DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::server_api Gabella::server)
+
+gabella_test(test_server_auth
+    SOURCES server/test_server_auth.cpp
+    DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::server_api Gabella::server)
+
+gabella_test(test_seed_db
+    SOURCES server/test_seed_db.cpp "${CMAKE_SOURCE_DIR}/tools/seed_db/DemoData.cpp"
+    DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::server_api Gabella::server)
+target_include_directories(test_seed_db PRIVATE "${CMAKE_SOURCE_DIR}/tools/seed_db")
