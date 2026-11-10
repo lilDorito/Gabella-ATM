@@ -34,3 +34,15 @@ gabella_test(test_server_core
 gabella_test(test_server_audit
     SOURCES server/test_server_audit.cpp
     DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::server_api Gabella::server)
+
+gabella_test(test_link
+    SOURCES atm/test_link.cpp
+    DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::server_api Gabella::atm)
+
+gabella_test(test_reconciliation
+    SOURCES server/test_reconciliation.cpp
+    DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::server_api Gabella::server)
+
+gabella_test(test_link_integration
+    SOURCES server/test_link_integration.cpp
+    DEPS Gabella::common Gabella::crypto Gabella::audit Gabella::access Gabella::server_api Gabella::atm Gabella::server)
