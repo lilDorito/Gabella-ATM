@@ -1,20 +1,26 @@
-#include "server/repo/AccountRepository.h"
+#pragma once
+#include <cstdint>
+#include <optional>
+#include <string>
 
-#include "server/db/Statement.h"
+#include "server/db/Database.h"
 
-std::optional<std::int64_t> AccountRepository::balance(const std::string& accountId) const
+struct AccountRecord
 {
-    Statement s(_db, "SELECT balance_kop FROM accounts WHERE account_id = ?");
-    s.bind(1, accountId);
-    if (!s.step()) return std::nullopt;
-    return s.columnInt64(0);
-}
+    std::string accountId;
+    std::string ownerName;
+    std::int64_t balanceKop = 0;
+};
 
-bool AccountRepository::debit(const std::string& accountId, std::int64_t amountKop)
+class AccountRepository
 {
-    if (amountKop <= 0) return false;
+private:
+    Database& _db;
 
-    Statement s(_db, "UPDATE accounts SET balance_kop = balance_kop - ? WHERE account_id = ? AND balance_kop >= ?");
-    s.bind(1, amountKop).bind(2, accountId).bind(3, amountKop).run();
-    return _db.changes() == 1;
-}
+public:
+    explicit AccountRepository(Database& db) : _db(db) {}
+
+    void insert(const AccountRecord& account);
+    std::optional<AccountRecord> find(const std::string& accountId) const;
+    [[nodiscard]] bool debit(const std::string& accountId, std::int64_t amountKop);
+};

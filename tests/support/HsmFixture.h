@@ -16,6 +16,8 @@ struct HsmFixture
     static constexpr const char* kMacKey = "1111222233334444";
     static constexpr const char* kAuditKey = "AAAABBBBCCCCDDDD";
     static constexpr const char* kPinKey = "PINPINPINPINPIN1";
+    static constexpr const char* kServerKey = "SERVERSERVERSRV1";
+    static constexpr const char* kAtmId = "ATM-001";
 
     std::array<unsigned char, 32> signPub{};
     std::array<unsigned char, 64> signSecret{};
@@ -30,10 +32,11 @@ struct HsmFixture
         crypto_sign_keypair(signPub.data(), signSecret.data());
         crypto_box_keypair(boxPub.data(), boxSecret.data());
 
-        bank = std::make_unique<BankHsm>(kMasterKey, kEncKey, kMacKey, auditKey, kPinKey, signPub, signSecret, boxPub, boxSecret);
+        bank = std::make_unique<BankHsm>(kServerKey, kPinKey, signPub, signSecret, boxPub, boxSecret);
         atm = std::make_unique<AtmHsm>(signPub, boxPub);
 
-        bool ok = atm->installMasterKey(kMasterKey);
+        bool ok = bank->provisionAtm(kAtmId, AtmKeySet{ kMasterKey, kEncKey, kMacKey, auditKey });
+        ok = ok && atm->installMasterKey(kMasterKey);
         ok = ok && atm->updateWorkingKey(KeyType::Encryption, *wrapWorkingKey(kMasterKey, KeyType::Encryption, kEncKey));
         ok = ok && atm->updateWorkingKey(KeyType::Mac, *wrapWorkingKey(kMasterKey, KeyType::Mac, kMacKey));
         ok = ok && atm->updateWorkingKey(KeyType::Audit, *wrapWorkingKey(kMasterKey, KeyType::Audit, auditKey));

@@ -275,15 +275,15 @@ void lifetimeAndRestartTests()
     check(unsure.dispense(blind.bank.signDispense(kAtmId, 50000, 1)) == DispenseResult::HardwareFault, "dispenser with an unreadable counter refuses every command");
 
     Rig keys;
-    auto first = keys.fx.bank->prepareWorkingKey(KeyType::Mac);
+    auto first = keys.fx.bank->prepareWorkingKey(kAtmId, KeyType::Mac);
     const SignedCommand oldKey = keys.bank.signCommand(1, Action::UpdateWorkingKey, kAtmId, "Mac|" + *first);
     keys.link.queuedCommands.push_back(oldKey);
     keys.atm.processServerCommands();
-    check(keys.fx.bank->commitWorkingKey(KeyType::Mac), "first MAC key installed");
-    auto second = keys.fx.bank->prepareWorkingKey(KeyType::Mac);
+    check(keys.fx.bank->commitWorkingKey(kAtmId, KeyType::Mac), "first MAC key installed");
+    auto second = keys.fx.bank->prepareWorkingKey(kAtmId, KeyType::Mac);
     keys.link.queuedCommands.push_back(keys.bank.signCommand(2, Action::UpdateWorkingKey, kAtmId, "Mac|" + *second));
     keys.atm.processServerCommands();
-    check(keys.fx.bank->commitWorkingKey(KeyType::Mac), "second MAC key installed");
+    check(keys.fx.bank->commitWorkingKey(kAtmId, KeyType::Mac), "second MAC key installed");
     const auto macBefore = keys.fx.atm->macMessage("probe");
     {
         AtmController restarted{ kAtmId, keys.reader, keys.keypad, keys.display, keys.dispenser, keys.tamper, keys.pin, *keys.fx.atm, keys.logger, keys.verifier, keys.access, keys.link,
@@ -318,7 +318,7 @@ void lifetimeAndRestartTests()
 
     Rig stuck;
     stuck.commandSeq.setFailSaves(true);
-    auto blob = stuck.fx.bank->prepareWorkingKey(KeyType::Mac);
+    auto blob = stuck.fx.bank->prepareWorkingKey(kAtmId, KeyType::Mac);
     const auto stuckBefore = stuck.fx.atm->macMessage("probe");
     stuck.link.queuedCommands.push_back(stuck.bank.signCommand(1, Action::UpdateWorkingKey, kAtmId, "Mac|" + *blob));
     stuck.atm.processServerCommands();
@@ -565,10 +565,10 @@ void tamperTests()
     std::uint64_t seq = 1;
     for (const auto& [type, name] : { std::pair{ KeyType::Encryption, "Encryption" }, std::pair{ KeyType::Mac, "Mac" }, std::pair{ KeyType::Audit, "Audit" } })
     {
-        auto blob = r.fx.bank->prepareWorkingKey(type);
+        auto blob = r.fx.bank->prepareWorkingKey(kAtmId, type);
         r.link.queuedCommands.push_back(r.bank.signCommand(++seq, Action::UpdateWorkingKey, kAtmId, std::string(name) + "|" + *blob));
         r.atm.processServerCommands();
-        check(r.link.commandResults.back().second && r.fx.bank->commitWorkingKey(type), std::string("signed ") + name + " key is installed during recovery");
+        check(r.link.commandResults.back().second && r.fx.bank->commitWorkingKey(kAtmId, type), std::string("signed ") + name + " key is installed during recovery");
     }
     check(r.atm.currentState() == SessionState::OutOfService, "new keys alone do not return the ATM to service");
 
@@ -613,22 +613,22 @@ void commandTests()
     r.atm.processServerCommands();
     check(r.link.commandResults.size() == 1, "command for another ATM is ignored");
 
-    auto blob = r.fx.bank->prepareWorkingKey(KeyType::Mac);
+    auto blob = r.fx.bank->prepareWorkingKey(kAtmId, KeyType::Mac);
     check(blob.has_value(), "bank prepares a new MAC key");
     r.link.queuedCommands.push_back(r.bank.signCommand(3, Action::UpdateWorkingKey, kAtmId, "Mac|" + *blob));
     r.atm.processServerCommands();
     check(r.link.commandResults.size() == 2 && r.link.commandResults[1].second && r.has(EventType::KEY_UPDATED), "UpdateWorkingKey is applied");
-    check(r.fx.bank->commitWorkingKey(KeyType::Mac), "bank switches to the new MAC key");
+    check(r.fx.bank->commitWorkingKey(kAtmId, KeyType::Mac), "bank switches to the new MAC key");
 
     r.insert();
     r.type({ "1", kPin.c_str() });
     r.atm.runSession();
     check(r.detailShown("12340.00"), "requests authenticate with the rotated MAC key");
 
-    auto auditBlob = r.fx.bank->prepareWorkingKey(KeyType::Audit);
+    auto auditBlob = r.fx.bank->prepareWorkingKey(kAtmId, KeyType::Audit);
     r.link.queuedCommands.push_back(r.bank.signCommand(4, Action::UpdateWorkingKey, kAtmId, "Audit|" + *auditBlob));
     r.atm.processServerCommands();
-    check(r.fx.bank->commitWorkingKey(KeyType::Audit), "bank switches to the new audit key");
+    check(r.fx.bank->commitWorkingKey(kAtmId, KeyType::Audit), "bank switches to the new audit key");
     check(r.anchors.load().has_value() && verifyCheckpointMac(*r.anchors.load(), r.signer), "local anchor is re-MACed with the new audit key");
 
     r.link.queuedCommands.push_back(r.bank.signCommand(5, Action::UpdateWorkingKey, kAtmId, "Bogus|abc"));

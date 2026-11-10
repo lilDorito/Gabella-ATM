@@ -6,54 +6,92 @@
 #include "common/Canonical.h"
 #include "crypto/KeyWrap.h"
 
-BankHsm::BankHsm(const std::string& masterKey,
-    const std::string& encKey,
-    const std::string& macKey,
-    const std::string& auditKey,
+namespace
+{
+constexpr std::size_t kKeySize = 16;
+constexpr const char* kReservedAtmId = "SERVER";
+
+bool sameKey(const std::string& a, const std::string& b) { return CryptoCore::constantTimeEqual(a, b); }
+}
+
+BankHsm::BankHsm(const std::string& serverKey,
     const std::string& pinKey,
     std::array<unsigned char, 32> signPublic,
     std::array<unsigned char, 64> signSecret,
     std::array<unsigned char, 32> boxPublic,
     std::array<unsigned char, 32> boxSecret)
-    : _masterKey(masterKey),
-      _encKey(encKey),
-      _macKey(macKey),
-      _auditKey(auditKey),
-      _pinKey(pinKey),
+    : _pinKey(pinKey),
       _signPublic(signPublic),
       _signSecret(signSecret),
       _boxPublic(boxPublic),
       _boxSecret(boxSecret)
 {
-    if (masterKey.size() != 16) throw std::invalid_argument("bank hsm: masterKey must be 16 bytes");
-    if (encKey.size() != 16) throw std::invalid_argument("bank hsm: encKey must be 16 bytes");
-    if (macKey.size() != 16) throw std::invalid_argument("bank hsm: macKey must be 16 bytes");
-    if (auditKey.size() != 16) throw std::invalid_argument("bank hsm: auditKey must be 16 bytes");
-    auto serverAuditKey = CryptoCore::hmacSha256(_masterKey, "SERVER-AUDIT-KEY");
+    if (serverKey.size() != kKeySize) throw std::invalid_argument("bank hsm: serverKey must be 16 bytes");
+    if (pinKey.size() != kKeySize) throw std::invalid_argument("bank hsm: pinKey must be 16 bytes");
+    auto serverAuditKey = CryptoCore::hmacSha256(serverKey, "SERVER-AUDIT-KEY");
     if (!serverAuditKey) throw std::runtime_error("bank hsm: server audit key derivation failed");
     _serverAuditKey = std::move(*serverAuditKey);
-    if (pinKey.size() != 16) throw std::invalid_argument("bank hsm: pinKey must be 16 bytes");
 }
 
 BankHsm::~BankHsm() { wipeKeys(); }
 
 void BankHsm::wipeKeys()
 {
-    CryptoCore::cleanse(_masterKey);
-    CryptoCore::cleanse(_encKey);
-    CryptoCore::cleanse(_macKey);
     CryptoCore::cleanse(_serverAuditKey);
-    CryptoCore::cleanse(_auditKey);
     CryptoCore::cleanse(_pinKey);
     CryptoCore::cleanse(_signSecret.data(), _signSecret.size());
     CryptoCore::cleanse(_boxSecret.data(), _boxSecret.size());
 
-    for (auto& [type, key] : _pendingKeys)
+    for (auto& [atmId, atm] : _atms)
     {
-        CryptoCore::cleanse(key);
+        CryptoCore::cleanse(atm.keys.masterKey);
+        CryptoCore::cleanse(atm.keys.encKey);
+        CryptoCore::cleanse(atm.keys.macKey);
+        CryptoCore::cleanse(atm.keys.auditKey);
+        for (auto& [type, key] : atm.pending) CryptoCore::cleanse(key);
+        atm.pending.clear();
     }
-    _pendingKeys.clear();
+    _atms.clear();
 }
+
+const BankHsm::AtmKeys* BankHsm::find(const std::string& atmId) const
+{
+    auto it = _atms.find(atmId);
+    return it == _atms.end() ? nullptr : &it->second;
+}
+
+BankHsm::AtmKeys* BankHsm::find(const std::string& atmId)
+{
+    auto it = _atms.find(atmId);
+    return it == _atms.end() ? nullptr : &it->second;
+}
+
+bool BankHsm::provisionAtm(const std::string& atmId, const AtmKeySet& keys)
+{
+    if (atmId.empty() || atmId == kReservedAtmId) return false;
+    if (_atms.count(atmId) > 0) return false;
+
+    const std::array<const std::string*, 4> mine{ &keys.masterKey, &keys.encKey, &keys.macKey, &keys.auditKey };
+    for (const std::string* key : mine)
+        if (key->size() != kKeySize) return false;
+
+    for (std::size_t i = 0; i < mine.size(); ++i)
+        for (std::size_t j = i + 1; j < mine.size(); ++j)
+            if (sameKey(*mine[i], *mine[j])) return false;
+
+    for (const auto& [otherId, other] : _atms)
+    {
+        const std::array<const std::string*, 4> theirs{ &other.keys.masterKey, &other.keys.encKey, &other.keys.macKey, &other.keys.auditKey };
+        for (const std::string* a : mine)
+            for (const std::string* b : theirs)
+                if (sameKey(*a, *b)) return false;
+    }
+
+    _atms[atmId].keys = keys;
+    return true;
+}
+
+bool BankHsm::hasAtm(const std::string& atmId) const { return find(atmId) != nullptr; }
 
 bool BankHsm::extractPin(const std::string& pinBlock, const std::string& pan, std::string& out) const
 {
@@ -106,9 +144,25 @@ bool BankHsm::extractPin(const std::string& pinBlock, const std::string& pan, st
     return true;
 }
 
-bool BankHsm::verifyMessage(const std::string& data, const std::string& mac) const { return CryptoCore::hmacVerify(_macKey, data, mac); }
-bool BankHsm::verifyAudit(const std::string& data, const std::string& mac) const { return CryptoCore::hmacVerify(_auditKey, "AUDIT:" + data, mac); }
-std::optional<std::string> BankHsm::macAudit(const std::string& data) const { return CryptoCore::hmacSha256(_auditKey, "AUDIT:" + data); }
+bool BankHsm::verifyMessage(const std::string& atmId, const std::string& data, const std::string& mac) const
+{
+    const AtmKeys* atm = find(atmId);
+    return atm && CryptoCore::hmacVerify(atm->keys.macKey, data, mac);
+}
+
+bool BankHsm::verifyAudit(const std::string& atmId, const std::string& data, const std::string& mac) const
+{
+    const AtmKeys* atm = find(atmId);
+    return atm && CryptoCore::hmacVerify(atm->keys.auditKey, "AUDIT:" + data, mac);
+}
+
+std::optional<std::string> BankHsm::macAudit(const std::string& atmId, const std::string& data) const
+{
+    const AtmKeys* atm = find(atmId);
+    if (!atm) return std::nullopt;
+    return CryptoCore::hmacSha256(atm->keys.auditKey, "AUDIT:" + data);
+}
+
 bool BankHsm::verifyServerAudit(const std::string& data, const std::string& mac) const { return CryptoCore::hmacVerify(_serverAuditKey, "AUDIT:" + data, mac); }
 std::optional<std::string> BankHsm::macServerAudit(const std::string& data) const { return CryptoCore::hmacSha256(_serverAuditKey, "AUDIT:" + data); }
 
@@ -120,10 +174,12 @@ std::optional<std::string> BankHsm::sign(SignDomain domain, const std::string& d
 
 std::optional<std::string> BankHsm::computePinVerifyValue(const std::string& pan, const std::string& pin) const { return CryptoCore::hmacSha256(_pinKey, canonicalEncode("PIN:", { pan, pin })); }
 
-bool BankHsm::verifyPin(const std::string& encryptedBlock, const std::string& pan, const std::string& pinVerifyValue, const std::string& binding) const
+bool BankHsm::verifyPin(const std::string& atmId, const std::string& encryptedBlock, const std::string& pan, const std::string& pinVerifyValue, const std::string& binding) const
 {
     if (binding.empty()) return false;
-    auto decrypted = CryptoCore::aesGcmDecrypt(_encKey, encryptedBlock, binding);
+    const AtmKeys* atm = find(atmId);
+    if (!atm) return false;
+    auto decrypted = CryptoCore::aesGcmDecrypt(atm->keys.encKey, encryptedBlock, binding);
     if (!decrypted) return false;
 
     std::string pinBlock = std::move(*decrypted);
@@ -160,57 +216,58 @@ bool BankHsm::openPassword(const std::string& sealed, const std::string& binding
     return bound;
 }
 
-std::optional<std::string> BankHsm::prepareWorkingKey(KeyType type)
+std::optional<std::string> BankHsm::prepareWorkingKey(const std::string& atmId, KeyType type)
 {
-    if (_pendingKeys.count(type) > 0) return std::nullopt;
+    AtmKeys* atm = find(atmId);
+    if (!atm) return std::nullopt;
+    if (atm->pending.count(type) > 0) return std::nullopt;
 
-    auto newKey = CryptoCore::randomBytes(16);
+    auto newKey = CryptoCore::randomBytes(kKeySize);
     if (!newKey) return std::nullopt;
 
-    auto blob = wrapWorkingKey(_masterKey, type, *newKey);
+    auto blob = wrapWorkingKey(atm->keys.masterKey, type, *newKey);
     if (!blob)
     {
         CryptoCore::cleanse(*newKey);
         return std::nullopt;
     }
 
-    auto it = _pendingKeys.find(type);
-    if (it != _pendingKeys.end())
-    {
-        CryptoCore::cleanse(it->second);
-    }
-    _pendingKeys[type] = *newKey;
+    atm->pending[type] = *newKey;
     CryptoCore::cleanse(*newKey);
 
     return blob;
 }
 
-bool BankHsm::commitWorkingKey(KeyType type)
+bool BankHsm::commitWorkingKey(const std::string& atmId, KeyType type)
 {
-    auto it = _pendingKeys.find(type);
-    if (it == _pendingKeys.end()) return false;
+    AtmKeys* atm = find(atmId);
+    if (!atm) return false;
+    auto it = atm->pending.find(type);
+    if (it == atm->pending.end()) return false;
 
     std::string newKey = std::move(it->second);
-    _pendingKeys.erase(it);
+    atm->pending.erase(it);
 
     switch (type)
     {
-    case KeyType::Encryption: _encKey = newKey; break;
-    case KeyType::Mac: _macKey = newKey; break;
-    case KeyType::Audit: _auditKey = newKey; break;
+    case KeyType::Encryption: atm->keys.encKey = newKey; break;
+    case KeyType::Mac: atm->keys.macKey = newKey; break;
+    case KeyType::Audit: atm->keys.auditKey = newKey; break;
     }
 
     CryptoCore::cleanse(newKey);
     return true;
 }
 
-bool BankHsm::cancelPendingWorkingKey(KeyType type)
+bool BankHsm::cancelPendingWorkingKey(const std::string& atmId, KeyType type)
 {
-    auto it = _pendingKeys.find(type);
-    if (it == _pendingKeys.end()) return false;
+    AtmKeys* atm = find(atmId);
+    if (!atm) return false;
+    auto it = atm->pending.find(type);
+    if (it == atm->pending.end()) return false;
 
     CryptoCore::cleanse(it->second);
-    _pendingKeys.erase(it);
+    atm->pending.erase(it);
     return true;
 }
 

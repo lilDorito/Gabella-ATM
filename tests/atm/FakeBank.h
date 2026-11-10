@@ -24,7 +24,7 @@ private:
     std::set<std::string> _nonces;
     std::map<std::string, std::pair<std::string, Role>> _staff;
 
-    bool macValid(const AuthRequest& r) const { return _hsm.verifyMessage(r.macPayload(), r.getMac()); }
+    bool macValid(const AuthRequest& r) const { return _hsm.verifyMessage(r.getAtmId(), r.macPayload(), r.getMac()); }
 
     AuthResponse finish(AuthResponse resp) const
     {
@@ -73,7 +73,7 @@ public:
             return finish(resp);
         }
 
-        if (!_hsm.verifyPin(r.getCiphertext(), r.getPan(), _pinVerifyValue, r.pinBinding()))
+        if (!_hsm.verifyPin(r.getAtmId(), r.getCiphertext(), r.getPan(), _pinVerifyValue, r.pinBinding()))
         {
             ++failedPins;
             if (failedPins >= 3)

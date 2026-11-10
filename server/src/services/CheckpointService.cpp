@@ -79,7 +79,7 @@ CheckpointVerdict CheckpointService::submit(const std::string& atmId, const Chec
 {
     if (!_atms.find(atmId)) return reject(CheckpointVerdict::UnknownAtm, atmId, cp);
     if (cp.logId != atmId || atmId == kServerLogId) return reject(CheckpointVerdict::WrongLog, atmId, cp);
-    if (cp.seqNo == 0 || !_hsm.verifyAudit(checkpointPayload(cp), cp.mac)) return reject(CheckpointVerdict::BadMac, atmId, cp);
+    if (cp.seqNo == 0 || !_hsm.verifyAudit(atmId, checkpointPayload(cp), cp.mac)) return reject(CheckpointVerdict::BadMac, atmId, cp);
     if (cp.timestamp > _clock.nowUnix() + _config.requestWindowSeconds) return reject(CheckpointVerdict::FromTheFuture, atmId, cp);
 
     if (const auto latest = _checkpoints.latest(atmId))

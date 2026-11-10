@@ -44,7 +44,7 @@ GateVerdict RequestGate::check(const char* call, const std::string& atmId, const
         verdict = GateVerdict::UnknownAtm;
     else if (atm->status == AtmStatus::OutOfService && !allowOutOfService)
         verdict = GateVerdict::AtmOutOfService;
-    else if (!_hsm.verifyMessage(macData, mac))
+    else if (!_hsm.verifyMessage(atmId, macData, mac))
         verdict = GateVerdict::BadMac;
     else
     {

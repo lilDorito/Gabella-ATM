@@ -284,19 +284,19 @@ static void testMac(AtmHsm& atm, BankHsm& bank)
     if (!mac) return;
 
     check(mac->size() == 32, "MAC is 32 bytes");
-    check(bank.verifyMessage(data, *mac), "server verifies MAC");
-    check(!bank.verifyMessage(data + "x", *mac), "altered data rejected");
+    check(bank.verifyMessage("ATM-001", data, *mac), "server verifies MAC");
+    check(!bank.verifyMessage("ATM-001", data + "x", *mac), "altered data rejected");
 
     auto audit = atm.macAudit("checkpoint content");
     check(audit.has_value(), "macAudit returns value");
     if (audit)
     {
-        check(bank.verifyAudit("checkpoint content", *audit), "server verifies audit MAC");
-        check(!bank.verifyAudit("other content", *audit), "audit MAC bound to content");
+        check(bank.verifyAudit("ATM-001", "checkpoint content", *audit), "server verifies audit MAC");
+        check(!bank.verifyAudit("ATM-001", "other content", *audit), "audit MAC bound to content");
     }
 
     // Cross-check: message MAC must not verify as audit MAC
-    check(!bank.verifyAudit(data, *mac), "message MAC does not work as audit MAC (key separation)");
+    check(!bank.verifyAudit("ATM-001", data, *mac), "message MAC does not work as audit MAC (key separation)");
 }
 
 // ---------------------------------------------------------------- Ed25519 sign/verify
@@ -409,7 +409,7 @@ static void testPinModule(AtmHsm& atm, BankHsm& bank)
     check(req->getMac().size() == 32, "mac is 32 bytes");
 
     // Server-side MAC verification
-    check(bank.verifyMessage(req->macPayload(), req->getMac()), "server verifies request MAC");
+    check(bank.verifyMessage("ATM-001", req->macPayload(), req->getMac()), "server verifies request MAC");
 
     // Altered action -> MAC breaks
     std::string wrongCanonical = canonicalEncode("REQ:",
@@ -423,18 +423,18 @@ static void testPinModule(AtmHsm& atm, BankHsm& bank)
             req->getPan(),
             std::to_string(req->getAmount()),
         });
-    check(!bank.verifyMessage(wrongCanonical, req->getMac()), "altered action breaks MAC");
+    check(!bank.verifyMessage("ATM-001", wrongCanonical, req->getMac()), "altered action breaks MAC");
 
     // Server-side PIN verification
-    check(bank.verifyPin(req->getCiphertext(), req->getPan(), *pinVerifyValue, req->pinBinding()), "server verifies PIN");
+    check(bank.verifyPin("ATM-001", req->getCiphertext(), req->getPan(), *pinVerifyValue, req->pinBinding()), "server verifies PIN");
 
     const std::string freshNonce = "fresh-nonce-0001";
     const std::int64_t later = req->getTimestamp() + 30;
     const AuthRequest replanted(req->getAtmId(), req->getSessionId(), Action::Withdraw, req->getCiphertext(), freshNonce, later, pan, 500000, "");
     auto forgedMac = atm.macMessage(replanted.macPayload());
     const AuthRequest forged(req->getAtmId(), req->getSessionId(), Action::Withdraw, req->getCiphertext(), freshNonce, later, pan, 500000, *forgedMac);
-    check(bank.verifyMessage(forged.macPayload(), forged.getMac()), "A17 setup: a compromised program gets a valid MAC for the new request");
-    check(!bank.verifyPin(forged.getCiphertext(), forged.getPan(), *pinVerifyValue, forged.pinBinding()), "A17: old PIN ciphertext moved into a new request is rejected");
+    check(bank.verifyMessage("ATM-001", forged.macPayload(), forged.getMac()), "A17 setup: a compromised program gets a valid MAC for the new request");
+    check(!bank.verifyPin("ATM-001", forged.getCiphertext(), forged.getPan(), *pinVerifyValue, forged.pinBinding()), "A17: old PIN ciphertext moved into a new request is rejected");
 
     // Failure paths
     check(!pm.processPin(card, "12ab", Action::Withdraw, 50000, "S", "A", 0), "non-digit PIN rejected");
@@ -472,9 +472,9 @@ static void testVerifyPin(AtmHsm& atm, BankHsm& bank)
         return;
     }
 
-    check(bank.verifyPin(*ciphertext, pan, *pinVerifyValue, binding), "correct PIN verifies");
+    check(bank.verifyPin("ATM-001", *ciphertext, pan, *pinVerifyValue, binding), "correct PIN verifies");
     const std::string otherAmount = AuthRequest::pinBinding("ATM-001", "S-1", Action::Withdraw, "nonce-1", 1700000000, pan, 900000);
-    check(!bank.verifyPin(*ciphertext, pan, *pinVerifyValue, otherAmount), "PIN bound to one amount does not verify for another");
+    check(!bank.verifyPin("ATM-001", *ciphertext, pan, *pinVerifyValue, otherAmount), "PIN bound to one amount does not verify for another");
 
     // Wrong PIN
     std::string wrongBlock;
@@ -482,16 +482,16 @@ static void testVerifyPin(AtmHsm& atm, BankHsm& bank)
     auto wrongCt = atm.encryptPinBlock(wrongBlock, binding);
     if (wrongCt)
     {
-        check(!bank.verifyPin(*wrongCt, pan, *pinVerifyValue, binding), "wrong PIN rejected");
+        check(!bank.verifyPin("ATM-001", *wrongCt, pan, *pinVerifyValue, binding), "wrong PIN rejected");
     }
 
     // Wrong PAN
-    check(!bank.verifyPin(*ciphertext, "1111111111111111", *pinVerifyValue, binding), "wrong PAN rejected");
+    check(!bank.verifyPin("ATM-001", *ciphertext, "1111111111111111", *pinVerifyValue, binding), "wrong PAN rejected");
 
     // Tampered ciphertext
     std::string bad = *ciphertext;
     bad[20] ^= 0x01;
-    check(!bank.verifyPin(bad, pan, *pinVerifyValue, binding), "tampered ciphertext rejected");
+    check(!bank.verifyPin("ATM-001", bad, pan, *pinVerifyValue, binding), "tampered ciphertext rejected");
 }
 
 // ---------------------------------------------------------------- working keys
@@ -501,32 +501,32 @@ static void testWorkingKeyRotation(BankHsm& bank)
     section("BankHsm working key rotation");
 
     // No pending key yet
-    check(!bank.commitWorkingKey(KeyType::Encryption), "commit fails without pending key");
-    check(!bank.cancelPendingWorkingKey(KeyType::Encryption), "cancel fails without pending key");
+    check(!bank.commitWorkingKey("ATM-001", KeyType::Encryption), "commit fails without pending key");
+    check(!bank.cancelPendingWorkingKey("ATM-001", KeyType::Encryption), "cancel fails without pending key");
 
     // Prepare -> second prepare rejected -> commit works
-    auto blob = bank.prepareWorkingKey(KeyType::Encryption);
+    auto blob = bank.prepareWorkingKey("ATM-001", KeyType::Encryption);
     check(blob.has_value(), "prepareWorkingKey returns a blob");
     if (!blob) return;
     check(blob->size() == 64, "blob is IV(16) + ciphertext(16) + tag(32)");
-    check(!bank.prepareWorkingKey(KeyType::Encryption).has_value(), "second prepare for same type is rejected while pending");
-    check(bank.commitWorkingKey(KeyType::Encryption), "commit succeeds with pending key");
-    check(!bank.commitWorkingKey(KeyType::Encryption), "second commit fails (pending consumed)");
-    check(bank.prepareWorkingKey(KeyType::Encryption).has_value(), "prepare allowed again after commit");
-    check(bank.cancelPendingWorkingKey(KeyType::Encryption), "cleanup: cancel pending Encryption key");
+    check(!bank.prepareWorkingKey("ATM-001", KeyType::Encryption).has_value(), "second prepare for same type is rejected while pending");
+    check(bank.commitWorkingKey("ATM-001", KeyType::Encryption), "commit succeeds with pending key");
+    check(!bank.commitWorkingKey("ATM-001", KeyType::Encryption), "second commit fails (pending consumed)");
+    check(bank.prepareWorkingKey("ATM-001", KeyType::Encryption).has_value(), "prepare allowed again after commit");
+    check(bank.cancelPendingWorkingKey("ATM-001", KeyType::Encryption), "cleanup: cancel pending Encryption key");
 
     // Prepare -> cancel -> prepare again allowed
-    check(bank.prepareWorkingKey(KeyType::Mac).has_value(), "prepare Mac key");
-    check(!bank.prepareWorkingKey(KeyType::Mac).has_value(), "second prepare Mac rejected");
-    check(bank.cancelPendingWorkingKey(KeyType::Mac), "cancel pending Mac key");
-    check(!bank.cancelPendingWorkingKey(KeyType::Mac), "second cancel Mac fails (nothing pending)");
-    check(bank.prepareWorkingKey(KeyType::Mac).has_value(), "prepare Mac allowed again after cancel");
-    check(bank.commitWorkingKey(KeyType::Mac), "cleanup: commit Mac key");
+    check(bank.prepareWorkingKey("ATM-001", KeyType::Mac).has_value(), "prepare Mac key");
+    check(!bank.prepareWorkingKey("ATM-001", KeyType::Mac).has_value(), "second prepare Mac rejected");
+    check(bank.cancelPendingWorkingKey("ATM-001", KeyType::Mac), "cancel pending Mac key");
+    check(!bank.cancelPendingWorkingKey("ATM-001", KeyType::Mac), "second cancel Mac fails (nothing pending)");
+    check(bank.prepareWorkingKey("ATM-001", KeyType::Mac).has_value(), "prepare Mac allowed again after cancel");
+    check(bank.commitWorkingKey("ATM-001", KeyType::Mac), "cleanup: commit Mac key");
 
     // Cancel must not affect other types.
-    check(bank.prepareWorkingKey(KeyType::Audit).has_value(), "prepare Audit key");
-    check(!bank.cancelPendingWorkingKey(KeyType::Encryption), "cancel Encryption while Audit pending does nothing");
-    check(bank.cancelPendingWorkingKey(KeyType::Audit), "cleanup: cancel Audit key");
+    check(bank.prepareWorkingKey("ATM-001", KeyType::Audit).has_value(), "prepare Audit key");
+    check(!bank.cancelPendingWorkingKey("ATM-001", KeyType::Encryption), "cancel Encryption while Audit pending does nothing");
+    check(bank.cancelPendingWorkingKey("ATM-001", KeyType::Audit), "cleanup: cancel Audit key");
 }
 
 // ---------------------------------------------------------------- tamper
@@ -543,7 +543,8 @@ static void testTamper()
     const std::string macKey = "1111222233334444";
     const std::string auditKey = "AAAABBBBCCCCDDDD";
 
-    BankHsm bank(masterKey, encKey, macKey, auditKey, "PINPINPINPINPIN1", bankSign.pub, bankSign.secret, bankBox.pub, bankBox.secret);
+    BankHsm bank("SERVERSERVERSRV1", "PINPINPINPINPIN1", bankSign.pub, bankSign.secret, bankBox.pub, bankBox.secret);
+    check(bank.provisionAtm("ATM-001", AtmKeySet{ masterKey, encKey, macKey, auditKey }), "setup: provisionAtm");
 
     AtmHsm hsm(bankSign.pub, bankBox.pub);
     check(hsm.installMasterKey(masterKey), "setup: installMasterKey");
@@ -590,6 +591,111 @@ static void testTamper()
     check(!hsm.installMasterKey(masterKey), "an operational HSM still refuses a second master key");
 }
 
+// ---------------------------------------------------------------- per-ATM keys
+
+static bool bringUp(AtmHsm& atm, const AtmKeySet& k)
+{
+    bool ok = atm.installMasterKey(k.masterKey);
+    ok = ok && atm.updateWorkingKey(KeyType::Encryption, *wrapWorkingKey(k.masterKey, KeyType::Encryption, k.encKey));
+    ok = ok && atm.updateWorkingKey(KeyType::Mac, *wrapWorkingKey(k.masterKey, KeyType::Mac, k.macKey));
+    ok = ok && atm.updateWorkingKey(KeyType::Audit, *wrapWorkingKey(k.masterKey, KeyType::Audit, k.auditKey));
+    return ok && atm.state() == AtmHsmState::Operational;
+}
+
+static void testPerAtmKeys()
+{
+    section("BankHsm: every ATM has its own keys");
+
+    SignKeyPair sign = generateSignKeyPair();
+    BoxKeyPair box = generateBoxKeyPair();
+    BankHsm bank("SERVERSERVERSRV1", "PINPINPINPINPIN1", sign.pub, sign.secret, box.pub, box.secret);
+
+    const AtmKeySet keysA{ "AAAAAAAAAAAAAAA1", "AAAAAAAAAAAAAAA2", "AAAAAAAAAAAAAAA3", "AAAAAAAAAAAAAAA4" };
+    const AtmKeySet keysB{ "BBBBBBBBBBBBBBB1", "BBBBBBBBBBBBBBB2", "BBBBBBBBBBBBBBB3", "BBBBBBBBBBBBBBB4" };
+
+    AtmKeySet shortKey = keysB;
+    shortKey.macKey = "short";
+    check(!bank.provisionAtm("ATM-B", shortKey), "a key that is not 16 bytes is refused");
+    check(bank.provisionAtm("ATM-A", keysA), "the first ATM is provisioned");
+    check(!bank.provisionAtm("ATM-A", keysB), "the same ATM cannot be provisioned twice");
+    check(!bank.provisionAtm("", keysB), "an empty ATM id is refused");
+    check(!bank.provisionAtm("SERVER", keysB), "the server's own log id is not an ATM id");
+    check(!bank.provisionAtm("ATM-B", AtmKeySet{ "BBBBBBBBBBBBBBB1", "BBBBBBBBBBBBBBB1", "BBBBBBBBBBBBBBB3", "BBBBBBBBBBBBBBB4" }), "two keys of one ATM cannot be equal");
+    check(!bank.provisionAtm("ATM-B", AtmKeySet{ "BBBBBBBBBBBBBBB1", "BBBBBBBBBBBBBBB2", "AAAAAAAAAAAAAAA3", "BBBBBBBBBBBBBBB4" }), "a key already held for another ATM is refused");
+    check(!bank.hasAtm("ATM-B"), "refused provisioning leaves nothing behind");
+    check(bank.provisionAtm("ATM-B", keysB), "the second ATM is provisioned with its own keys");
+    check(bank.hasAtm("ATM-A") && bank.hasAtm("ATM-B") && !bank.hasAtm("ATM-C"), "hasAtm tells provisioned ATMs apart");
+
+    AtmHsm atmA(sign.pub, box.pub);
+    AtmHsm atmB(sign.pub, box.pub);
+    check(bringUp(atmA, keysA) && bringUp(atmB, keysB), "setup: both ATM HSMs are operational");
+
+    const std::string data = "same bytes for both";
+    const std::string macA = *atmA.macMessage(data);
+    const std::string macB = *atmB.macMessage(data);
+    check(macA != macB, "two ATMs MAC the same bytes differently");
+    check(bank.verifyMessage("ATM-A", data, macA) && bank.verifyMessage("ATM-B", data, macB), "each MAC verifies under its own ATM");
+    check(!bank.verifyMessage("ATM-B", data, macA) && !bank.verifyMessage("ATM-A", data, macB), "a MAC from one ATM does not verify as another");
+    check(!bank.verifyMessage("ATM-C", data, macA), "an unknown ATM verifies nothing");
+
+    const std::string auditA = *atmA.macAudit("checkpoint");
+    check(bank.verifyAudit("ATM-A", "checkpoint", auditA), "an audit MAC verifies under its own ATM");
+    check(!bank.verifyAudit("ATM-B", "checkpoint", auditA), "an audit MAC from one ATM does not verify as another");
+    check(!bank.verifyAudit("ATM-C", "checkpoint", auditA), "an unknown ATM has no audit key");
+    check(bank.macAudit("ATM-A", "checkpoint") == auditA && !bank.macAudit("ATM-C", "checkpoint").has_value(), "macAudit follows the same per-ATM key");
+
+    const std::string pan = "5432101234567890";
+    const auto verifyValue = bank.computePinVerifyValue(pan, "1234");
+    std::string block;
+    check(verifyValue.has_value() && buildPinBlock("1234", pan, block), "setup: PIN block");
+    const auto ciphertext = atmA.encryptPinBlock(block, "binding");
+    check(ciphertext.has_value(), "setup: PIN ciphertext");
+    if (verifyValue && ciphertext)
+    {
+        check(bank.verifyPin("ATM-A", *ciphertext, pan, *verifyValue, "binding"), "a PIN ciphertext verifies under its own ATM");
+        check(!bank.verifyPin("ATM-B", *ciphertext, pan, *verifyValue, "binding"), "the same ciphertext is useless under another ATM's key");
+        check(!bank.verifyPin("ATM-C", *ciphertext, pan, *verifyValue, "binding"), "an unknown ATM verifies no PIN");
+    }
+
+    check(!bank.prepareWorkingKey("ATM-C", KeyType::Mac).has_value(), "no key rotation for an unknown ATM");
+    check(!bank.commitWorkingKey("ATM-C", KeyType::Mac) && !bank.cancelPendingWorkingKey("ATM-C", KeyType::Mac), "no commit or cancel for an unknown ATM");
+
+    auto blob = bank.prepareWorkingKey("ATM-A", KeyType::Mac);
+    check(blob.has_value(), "a new MAC key is prepared for ATM-A");
+    if (!blob) return;
+    check(!atmB.updateWorkingKey(KeyType::Mac, *blob), "ATM-B cannot install a key wrapped for ATM-A");
+    check(bank.prepareWorkingKey("ATM-B", KeyType::Mac).has_value(), "a pending key of ATM-A does not block ATM-B");
+    check(bank.cancelPendingWorkingKey("ATM-B", KeyType::Mac), "ATM-B's pending key can be cancelled alone");
+    check(!bank.commitWorkingKey("ATM-B", KeyType::Mac), "and then ATM-B has nothing to commit");
+
+    check(bank.commitWorkingKey("ATM-A", KeyType::Mac), "ATM-A switches to the new MAC key");
+    check(!bank.verifyMessage("ATM-A", data, macA), "ATM-A's old MAC no longer verifies");
+    check(bank.verifyMessage("ATM-B", data, macB), "ATM-B's MAC is unaffected by ATM-A's rotation");
+    check(atmA.updateWorkingKey(KeyType::Mac, *blob), "ATM-A installs the key from its blob");
+    check(bank.verifyMessage("ATM-A", data, *atmA.macMessage(data)), "ATM-A's new MAC verifies");
+}
+
+// ---------------------------------------------------------------- password hashing
+
+static void testPasswordHash()
+{
+    section("CryptoCore::hashPassword / verifyPassword");
+
+    auto hash = CryptoCore::hashPassword("S3cretPass");
+    check(hash.has_value(), "hashPassword returns a value");
+    if (!hash) return;
+
+    check(hash->rfind("$argon2id$", 0) == 0, "the hash is argon2id in the standard string format");
+    check(CryptoCore::verifyPassword(*hash, "S3cretPass"), "the right password verifies");
+    check(!CryptoCore::verifyPassword(*hash, "S3cretPass "), "a different password does not");
+    check(!CryptoCore::verifyPassword(*hash, ""), "an empty password does not");
+    auto other = CryptoCore::hashPassword("S3cretPass");
+    check(other && *other != *hash, "hashing twice gives different strings (random salt)");
+    check(!CryptoCore::verifyPassword("", "S3cretPass"), "an empty hash verifies nothing");
+    check(!CryptoCore::verifyPassword("$argon2id$garbage", "S3cretPass"), "a malformed hash verifies nothing");
+    check(!CryptoCore::verifyPassword(std::string(500, 'x'), "S3cretPass"), "an oversized hash verifies nothing");
+}
+
 // ---------------------------------------------------------------- main
 
 int main()
@@ -615,7 +721,8 @@ int main()
     BoxKeyPair bankBox = generateBoxKeyPair();
 
     // BankHsm (trusted side)
-    BankHsm bank(masterKey, encKey, macKey, auditKey, pinKey, bankSign.pub, bankSign.secret, bankBox.pub, bankBox.secret);
+    BankHsm bank("SERVERSERVERSRV1", pinKey, bankSign.pub, bankSign.secret, bankBox.pub, bankBox.secret);
+    check(bank.provisionAtm("ATM-001", AtmKeySet{ masterKey, encKey, macKey, auditKey }), "setup: provisionAtm");
 
     // AtmHsm (untrusted side) — knows only the bank's public keys
     AtmHsm atm(bankSign.pub, bankBox.pub);
@@ -639,6 +746,8 @@ int main()
     testSealedBox(atm, bank);
     testPinModule(atm, bank);
     testVerifyPin(atm, bank);
+    testPerAtmKeys();
+    testPasswordHash();
     testTamper();
     testWorkingKeyRotation(bank);   // mutates `bank`, keep last
 
