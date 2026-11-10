@@ -77,7 +77,7 @@ void serverLogTests()
     const auto cp = r.checkpoints.latest(kServerLogId);
     check(cp && cp->seqNo == r.log.lastSeqNo(), "its checkpoints are stored under the SERVER log id");
     check(cp && r.fx.bank->verifyServerAudit(checkpointPayload(*cp), cp->mac), "they are MACed with the server audit key");
-    check(cp && !r.fx.bank->verifyAudit(checkpointPayload(*cp), cp->mac), "the ATM audit key does not verify them");
+    check(cp && !r.fx.bank->verifyAudit(kRigAtm, checkpointPayload(*cp), cp->mac), "the ATM audit key does not verify them");
     check(r.checkpointService.submit(kServerLogId, *cp) == CheckpointVerdict::UnknownAtm, "nobody can submit into the server's log");
 }
 

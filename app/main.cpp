@@ -23,6 +23,7 @@ const std::string kMasterKey = "0123456789ABCDEF";
 const std::string kEncKey = "FEDCBA9876543210";
 const std::string kMacKey = "1111222233334444";
 const std::string kAuditKey = "AAAABBBBCCCCDDDD";
+const std::string kServerKey = "SERVERSERVERSRV1";
 const std::string kPinKey = "PINPINPINPINPIN1";
 
 std::array<unsigned char, 32> demoSeed(char fill)
@@ -69,7 +70,12 @@ int main()
 
         SystemClock clock;
 
-        BankHsm bankHsm(kMasterKey, kEncKey, kMacKey, kAuditKey, kPinKey, signPub, signSecret, boxPub, boxSecret);
+        BankHsm bankHsm(kServerKey, kPinKey, signPub, signSecret, boxPub, boxSecret);
+        if (!bankHsm.provisionAtm("ATM-001", AtmKeySet{ kMasterKey, kEncKey, kMacKey, kAuditKey }))
+        {
+            std::cerr << "fatal: bank HSM could not provision ATM-001\n";
+            return 1;
+        }
         BankHsmAuditSigner serverSigner(bankHsm);
         FileLogStorage serverStorage("logs/server.log");
         FileAnchorStore serverAnchors("logs/server.anchor");

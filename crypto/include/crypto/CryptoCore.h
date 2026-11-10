@@ -43,6 +43,10 @@ bool sealedBoxOpen(const std::array<unsigned char, crypto_box_PUBLICKEYBYTES>& r
 
 std::optional<std::string> sealedBoxSeal(const std::array<unsigned char, crypto_box_PUBLICKEYBYTES>& recipientPublicKey, const std::string& plaintext);
 
+std::optional<std::string> hashPassword(const std::string& password);
+
+bool verifyPassword(const std::string& hash, const std::string& password);
+
 class StringWiper
 {
     std::string& _s;

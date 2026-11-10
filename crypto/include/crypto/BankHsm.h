@@ -8,29 +8,38 @@
 #include "crypto/HsmTypes.h"
 #include "crypto/SignDomain.h"
 
+struct AtmKeySet
+{
+    std::string masterKey;
+    std::string encKey;
+    std::string macKey;
+    std::string auditKey;
+};
+
 class BankHsm final
 {
 private:
-    std::string _masterKey;
-    std::string _encKey;
-    std::string _macKey;
-    std::string _auditKey;
+    struct AtmKeys
+    {
+        AtmKeySet keys;
+        std::map<KeyType, std::string> pending;
+    };
+
     std::string _serverAuditKey;
     std::string _pinKey;
     std::array<unsigned char, 32> _signPublic;
     std::array<unsigned char, 64> _signSecret;
     std::array<unsigned char, 32> _boxPublic;
     std::array<unsigned char, 32> _boxSecret;
-    std::map<KeyType, std::string> _pendingKeys;
+    std::map<std::string, AtmKeys> _atms;
 
     void wipeKeys();
     bool extractPin(const std::string& pinBlock, const std::string& pan, std::string& out) const;
+    const AtmKeys* find(const std::string& atmId) const;
+    AtmKeys* find(const std::string& atmId);
 
 public:
-    BankHsm(const std::string& masterKey,
-        const std::string& encKey,
-        const std::string& macKey,
-        const std::string& auditKey,
+    BankHsm(const std::string& serverKey,
         const std::string& pinKey,
         std::array<unsigned char, 32> signPublic,
         std::array<unsigned char, 64> signSecret,
@@ -44,18 +53,21 @@ public:
     BankHsm(BankHsm&&) = delete;
     BankHsm& operator=(BankHsm&&) = delete;
 
-    [[nodiscard]] bool verifyMessage(const std::string& data, const std::string& mac) const;
-    [[nodiscard]] bool verifyAudit(const std::string& data, const std::string& mac) const;
-    [[nodiscard]] std::optional<std::string> macAudit(const std::string& data) const;
+    [[nodiscard]] bool provisionAtm(const std::string& atmId, const AtmKeySet& keys);
+    [[nodiscard]] bool hasAtm(const std::string& atmId) const;
+
+    [[nodiscard]] bool verifyMessage(const std::string& atmId, const std::string& data, const std::string& mac) const;
+    [[nodiscard]] bool verifyAudit(const std::string& atmId, const std::string& data, const std::string& mac) const;
+    [[nodiscard]] std::optional<std::string> macAudit(const std::string& atmId, const std::string& data) const;
     [[nodiscard]] bool verifyServerAudit(const std::string& data, const std::string& mac) const;
     [[nodiscard]] std::optional<std::string> macServerAudit(const std::string& data) const;
     [[nodiscard]] std::optional<std::string> sign(SignDomain domain, const std::string& data) const;
-    [[nodiscard]] bool verifyPin(const std::string& encryptedBlock, const std::string& pan, const std::string& pinVerifyValue, const std::string& binding) const;
+    [[nodiscard]] bool verifyPin(const std::string& atmId, const std::string& encryptedBlock, const std::string& pan, const std::string& pinVerifyValue, const std::string& binding) const;
     [[nodiscard]] std::optional<std::string> computePinVerifyValue(const std::string& pan, const std::string& pin) const;
     [[nodiscard]] bool openPassword(const std::string& sealed, const std::string& binding, std::string& out) const;
-    [[nodiscard]] std::optional<std::string> prepareWorkingKey(KeyType type);
-    [[nodiscard]] bool commitWorkingKey(KeyType type);
-    [[nodiscard]] bool cancelPendingWorkingKey(KeyType type);
+    [[nodiscard]] std::optional<std::string> prepareWorkingKey(const std::string& atmId, KeyType type);
+    [[nodiscard]] bool commitWorkingKey(const std::string& atmId, KeyType type);
+    [[nodiscard]] bool cancelPendingWorkingKey(const std::string& atmId, KeyType type);
     [[nodiscard]] std::array<unsigned char, 32> signPublicKey() const;
     [[nodiscard]] std::array<unsigned char, 32> boxPublicKey() const;
 };

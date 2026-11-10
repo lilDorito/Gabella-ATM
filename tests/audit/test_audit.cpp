@@ -389,12 +389,12 @@ void testHsmIntegration(HsmFixture& fx)
     Checkpoint cp = rig.sink.items().back();
 
     BankHsmAuditSigner bankSigner(*fx.bank);
-    check(fx.bank->verifyAudit(checkpointPayload(cp), cp.mac), "BankHsm accepts the ATM checkpoint under the ATM's audit key");
+    check(fx.bank->verifyAudit("ATM-001", checkpointPayload(cp), cp.mac), "BankHsm accepts the ATM checkpoint under the ATM's audit key");
     check(!verifyCheckpointMac(cp, bankSigner), "the server log's key does not accept ATM checkpoints");
 
     Checkpoint moved = cp;
     moved.logId = "ATM-002";
-    check(!fx.bank->verifyAudit(checkpointPayload(moved), moved.mac), "checkpoint bound to its log id");
+    check(!fx.bank->verifyAudit("ATM-001", checkpointPayload(moved), moved.mac), "checkpoint bound to its log id");
 
     InMemoryLogStorage serverStorage;
     InMemoryAnchorStore serverAnchors;
@@ -405,7 +405,7 @@ void testHsmIntegration(HsmFixture& fx)
     for (int i = 0; i < 4; ++i) (void)serverLog.record(sampleEvent(i));
     check(serverSink.items().size() == 1 && verifyCheckpointMac(serverSink.items()[0], bankSigner), "server checkpoints MACed by BankHsm");
     check(!verifyCheckpointMac(serverSink.items()[0], rig.signer), "an ATM's audit key does not accept server checkpoints");
-    check(!fx.bank->verifyAudit(checkpointPayload(serverSink.items()[0]), serverSink.items()[0].mac), "the server log key is separate from the ATM audit key");
+    check(!fx.bank->verifyAudit("ATM-001", checkpointPayload(serverSink.items()[0]), serverSink.items()[0].mac), "the server log key is separate from the ATM audit key");
 
     HsmFixture tamperFx;
     Rig tamperRig(*tamperFx.atm);

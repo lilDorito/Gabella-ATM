@@ -310,3 +310,16 @@ std::optional<std::string> CryptoCore::sealedBoxSeal(const std::array<unsigned c
 
     return ciphertext;
 }
+
+std::optional<std::string> CryptoCore::hashPassword(const std::string& password)
+{
+    char hash[crypto_pwhash_STRBYTES];
+    if (crypto_pwhash_str(hash, password.c_str(), password.size(), crypto_pwhash_OPSLIMIT_INTERACTIVE, crypto_pwhash_MEMLIMIT_INTERACTIVE) != 0) return std::nullopt;
+    return std::string(hash);
+}
+
+bool CryptoCore::verifyPassword(const std::string& hash, const std::string& password)
+{
+    if (hash.empty() || hash.size() >= crypto_pwhash_STRBYTES) return false;
+    return crypto_pwhash_str_verify(hash.c_str(), password.c_str(), password.size()) == 0;
+}
