@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "server/db/Database.h"
 
@@ -32,6 +33,7 @@ public:
 
     void insert(const std::string& atmId);
     std::optional<AtmRecord> find(const std::string& atmId) const;
+    std::vector<AtmRecord> all() const;
     [[nodiscard]] bool setStatus(const std::string& atmId, AtmStatus status);
     [[nodiscard]] bool flagLogReview(const std::string& atmId);
 };
