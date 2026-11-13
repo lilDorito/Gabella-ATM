@@ -25,8 +25,8 @@ private:
         if (!online) return false;
 
         const std::int64_t age = _clock.nowUnix() - header.timestamp;
-        const bool valid =
-            header.atmId == expectedAtm && _hsm.verifyMessage(header.macPayload(call, body), header.mac) && age <= 60 && age >= -60 && !header.nonce.empty() && _nonces.insert(header.nonce).second;
+        const bool macOk = _hsm.verifyMessage(header.atmId, header.macPayload(call, body), header.mac);
+        const bool valid = header.atmId == expectedAtm && macOk && age <= 60 && age >= -60 && !header.nonce.empty() && _nonces.insert(header.nonce).second;
         if (!valid)
         {
             ++rejectedHeaders;
@@ -163,7 +163,7 @@ public:
         if (throwOnCall) throw std::runtime_error("simulated server failure");
         if (!online) return false;
 
-        const bool authentic = _hsm.verifyMessage(header.macPayload(ApiCall::ReportTamper, ApiBody::empty()), header.mac);
+        const bool authentic = _hsm.verifyMessage(header.atmId, header.macPayload(ApiCall::ReportTamper, ApiBody::empty()), header.mac);
         if (!authentic && !acceptUnauthenticatedTamper) return false;
 
         tamperSeen = true;

@@ -6,7 +6,9 @@
 #include <vector>
 
 #include "access/AccessControl.h"
+#include "access/ApprovalService.h"
 #include "access/DualControlManager.h"
+#include "access/StaffAuthService.h"
 #include "access/StaffTokenStore.h"
 #include "audit/IAuditSink.h"
 #include "server/repo/AtmRepository.h"
@@ -31,6 +33,8 @@ class AdminConsole
 {
 private:
     AccessControl& _access;
+    StaffAuthService& _staffAuth;
+    ApprovalService& _approvals;
     StaffTokenStore& _tokens;
     DualControlManager& _dual;
     CommandService& _commands;
@@ -40,8 +44,22 @@ private:
     std::optional<StaffIdentity> adminOf(const std::string& token);
 
 public:
-    AdminConsole(AccessControl& access, StaffTokenStore& tokens, DualControlManager& dual, CommandService& commands, AtmRepository& atms, IAuditSink& log)
-        : _access(access), _tokens(tokens), _dual(dual), _commands(commands), _atms(atms), _log(log)
+    AdminConsole(AccessControl& access,
+        StaffAuthService& staffAuth,
+        ApprovalService& approvals,
+        StaffTokenStore& tokens,
+        DualControlManager& dual,
+        CommandService& commands,
+        AtmRepository& atms,
+        IAuditSink& log)
+        : _access(access),
+          _staffAuth(staffAuth),
+          _approvals(approvals),
+          _tokens(tokens),
+          _dual(dual),
+          _commands(commands),
+          _atms(atms),
+          _log(log)
     {
     }
 

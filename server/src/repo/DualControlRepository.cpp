@@ -62,7 +62,8 @@ std::vector<std::string> DualControlRepository::approversOf(const std::string& r
 
 bool DualControlRepository::insertRequest(const CriticalRequest& r)
 {
-    Statement s(_db, "INSERT OR IGNORE INTO dual_control_requests (request_id, action, params, initiator_id, required_approvals, created_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')");
+    Statement s(
+        _db, "INSERT OR IGNORE INTO dual_control_requests (request_id, action, params, initiator_id, required_approvals, created_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')");
     s.bind(1, r.requestId)
         .bind(2, std::string(actionToString(r.action)))
         .bind(3, r.params)
@@ -92,6 +93,13 @@ bool DualControlRepository::setStatus(const std::string& requestId, RequestStatu
 {
     Statement s(_db, "UPDATE dual_control_requests SET status = ? WHERE request_id = ? AND status = ?");
     s.bind(1, std::string(statusToColumn(to))).bind(2, requestId).bind(3, std::string(statusToColumn(from))).run();
+    return _db.changes() == 1;
+}
+
+bool DualControlRepository::setExpiresAt(const std::string& requestId, std::int64_t expiresAt)
+{
+    Statement s(_db, "UPDATE dual_control_requests SET expires_at = ? WHERE request_id = ?");
+    s.bind(1, expiresAt).bind(2, requestId).run();
     return _db.changes() == 1;
 }
 

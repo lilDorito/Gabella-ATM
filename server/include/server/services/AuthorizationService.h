@@ -12,7 +12,7 @@
 #include "server/repo/AccountRepository.h"
 #include "server/repo/AtmRepository.h"
 #include "server/repo/CardRepository.h"
-#include "server/repo/TransactionRepository.h"
+#include "server/repo/TxRepository.h"
 #include "server/services/ServerServices.h"
 
 class AuthorizationService final : public IAuthorizationService, public IIntentResolver
@@ -31,7 +31,7 @@ private:
     AtmRepository& _atms;
     CardRepository& _cards;
     AccountRepository& _accounts;
-    TransactionRepository& _transactions;
+    TxRepository& _transactions;
     IAuditSink& _log;
     const IClock& _clock;
     const SystemConfig& _config;
@@ -46,6 +46,7 @@ private:
     AuthResponse balance(const AuthRequest& request);
     AuthResponse withdraw(const AuthRequest& request);
     Reservation reserve(const AuthRequest& request, const DispenseCommand& command, std::int64_t now);
+    std::optional<std::int64_t> availableKop(const std::string& accountId) const;
     std::optional<AuthStatus> withdrawalRefusal(const CardRecord& card, std::int64_t amountKop, std::int64_t now, std::string& reason) const;
 
 public:
@@ -54,7 +55,7 @@ public:
         AtmRepository& atms,
         CardRepository& cards,
         AccountRepository& accounts,
-        TransactionRepository& transactions,
+        TxRepository& transactions,
         IAuditSink& log,
         const IClock& clock,
         const SystemConfig& config);

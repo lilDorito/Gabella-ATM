@@ -28,6 +28,7 @@ public:
     [[nodiscard]] bool insertApproval(const std::string& requestId, const std::string& staffId, std::int64_t approvedAt) override;
     [[nodiscard]] std::uint32_t countApprovals(const std::string& requestId) const override;
     [[nodiscard]] bool setStatus(const std::string& requestId, RequestStatus from, RequestStatus to) override;
+    [[nodiscard]] bool setExpiresAt(const std::string& requestId, std::int64_t expiresAt) override;
     [[nodiscard]] std::optional<CriticalRequest> find(const std::string& requestId) const override;
     [[nodiscard]] std::vector<CriticalRequest> listPending() const override;
     [[nodiscard]] bool inTransaction(const std::function<bool()>& fn) override;

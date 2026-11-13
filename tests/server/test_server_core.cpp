@@ -277,6 +277,21 @@ void facadeTests()
     stub.fail = false;
     check(server.authorize(makeRequest(r, "auth-nonce-0004")).status == AuthStatus::Error, "an ATM reported as tampered gets no more authorizations");
     check(server.pollCommands(r.header(ApiCall::PollCommands, ApiBody::empty())).empty(), "it can still poll for recovery commands");
+
+    ServerRig wiped;
+    RequestHeader bare;
+    bare.atmId = kRigAtm;
+    bare.timestamp = wiped.clock.nowUnix();
+    check(wiped.server.reportTamper(bare), "a tamper report without a MAC is accepted, since a wiped HSM cannot sign one");
+    check(wiped.atms.find(kRigAtm)->status == AtmStatus::OutOfService && wiped.count(EventType::TAMPER_DETECTED) == 1, "it can only take the ATM out of service");
+    RequestHeader stranger = bare;
+    stranger.atmId = "ATM-404";
+    check(!wiped.server.reportTamper(stranger), "an unknown ATM is still refused");
+    ServerRig forged;
+    RequestHeader badMac = forged.header(ApiCall::ReportTamper, ApiBody::empty());
+    badMac.mac[0] = static_cast<char>(badMac.mac[0] ^ 1);
+    check(forged.server.reportTamper(badMac) && forged.atms.find(kRigAtm)->status == AtmStatus::OutOfService, "a wrong MAC counts as no MAC");
+    check(forged.server.authorize(makeRequest(forged, "auth-nonce-0005")).status == AuthStatus::Error, "and nothing else gets through without one");
 }
 }
 

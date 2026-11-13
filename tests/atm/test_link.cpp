@@ -142,7 +142,8 @@ void queueTests()
 
     {
         std::ofstream out(path, std::ios::app | std::ios::binary);
-        out << "not-hex\n" << "abcd\n";
+        out << "not-hex\n"
+            << "abcd\n";
     }
     PendingReportQueue damaged(path);
     check(!damaged.load() && damaged.size() == 2 && damaged.skippedOnLoad() == 2, "damaged lines are skipped and counted, the good ones survive");

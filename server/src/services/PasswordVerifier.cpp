@@ -7,10 +7,7 @@
 PasswordCheckFn makeArgon2idVerifier()
 {
     if (sodium_init() < 0) throw std::runtime_error("libsodium cannot be initialised");
-    return [](const std::string& hash, const std::string& password)
-    {
-        return crypto_pwhash_str_verify(hash.c_str(), password.data(), password.size()) == 0;
-    };
+    return [](const std::string& hash, const std::string& password) { return crypto_pwhash_str_verify(hash.c_str(), password.data(), password.size()) == 0; };
 }
 
 std::optional<std::string> hashPasswordArgon2id(const std::string& password)

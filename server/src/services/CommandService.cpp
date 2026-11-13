@@ -65,10 +65,7 @@ LogEvent commandEvent(EventType type, Outcome outcome, const std::string& atmId,
     return e;
 }
 
-std::string describe(const CommandRecord& c)
-{
-    return "atm=" + c.atmId + " seq=" + std::to_string(c.seq) + " action=" + actionToString(c.action) + " id=" + c.requestId;
-}
+std::string describe(const CommandRecord& c) { return "atm=" + c.atmId + " seq=" + std::to_string(c.seq) + " action=" + actionToString(c.action) + " id=" + c.requestId; }
 
 std::optional<std::pair<std::string, std::uint64_t>> parseCommandOpId(const std::string& opId, const std::string& prefix)
 {
@@ -174,7 +171,7 @@ EnqueueResult CommandService::enqueueApproved(const std::string& requestId)
         {
             // The new key is created inside the HSM and leaves it only encrypted. The bank keeps it pending
             // until the ATM confirms that it has switched.
-            const auto blob = _hsm.prepareWorkingKey(*keyType);
+            const auto blob = _hsm.prepareWorkingKey(target->atmId, *keyType);
             if (!blob) return closeEnqueue(intent, EnqueueResult::KeyUnavailable, where + " reason=key_unavailable");
             params = keyName + "|" + *blob;
         }
@@ -202,7 +199,7 @@ EnqueueResult CommandService::enqueueApproved(const std::string& requestId)
             const auto signature = _hsm.sign(SignDomain::Command, signedCommand.signedPayload());
             if (!signature)
             {
-                if (keyType) (void)_hsm.cancelPendingWorkingKey(*keyType);
+                if (keyType) (void)_hsm.cancelPendingWorkingKey(target->atmId, *keyType);
                 closeIntent(intent, Outcome::Failure, where + " reason=signing_failed");
                 return EnqueueResult::SigningFailed;
             }
@@ -213,7 +210,7 @@ EnqueueResult CommandService::enqueueApproved(const std::string& requestId)
         }
         catch (const std::exception&)
         {
-            if (keyType) (void)_hsm.cancelPendingWorkingKey(*keyType);
+            if (keyType) (void)_hsm.cancelPendingWorkingKey(target->atmId, *keyType);
             return closeEnqueue(intent, EnqueueResult::StorageFailure, where + " reason=storage_failure");
         }
 
@@ -290,14 +287,15 @@ bool CommandService::reportCommandResult(const std::string& atmId, std::uint64_t
     bool clean = true;
     if (const auto keyType = keyTypeOf(*command))
     {
-        const bool done = ok ? _hsm.commitWorkingKey(*keyType) : _hsm.cancelPendingWorkingKey(*keyType);
+        const bool done = ok ? _hsm.commitWorkingKey(command->atmId, *keyType) : _hsm.cancelPendingWorkingKey(command->atmId, *keyType);
         if (!done)
         {
             notes += " reason=pending_key_missing";
             clean = false;
         }
         else if (ok)
-            (void)_log.record(commandEvent(EventType::KEY_UPDATED, Outcome::Success, atmId, "atm=" + atmId + " seq=" + std::to_string(commandSeq) + " key=" + command->params.substr(0, command->params.find('|'))));
+            (void)_log.record(
+                commandEvent(EventType::KEY_UPDATED, Outcome::Success, atmId, "atm=" + atmId + " seq=" + std::to_string(commandSeq) + " key=" + command->params.substr(0, command->params.find('|'))));
     }
     if (ok && !_dual.markExecuted(command->requestId))
     {
@@ -327,7 +325,7 @@ bool CommandService::expire(const CommandRecord& command)
     }
     if (stored)
     {
-        if (const auto keyType = keyTypeOf(command)) (void)_hsm.cancelPendingWorkingKey(*keyType);
+        if (const auto keyType = keyTypeOf(command)) (void)_hsm.cancelPendingWorkingKey(command.atmId, *keyType);
     }
     closeIntent(intent, Outcome::Failure, where + (stored ? " reason=expired" : " reason=storage_failure"));
     return stored;
@@ -354,8 +352,7 @@ bool CommandService::owns(const LogEntry& intent) const
 {
     const LogEvent& e = intent.getEvent();
     if (e.type == EventType::DUAL_CONTROL_APPROVED) return e.opId.compare(0, std::string(kEnqueuePrefix).size(), kEnqueuePrefix) == 0;
-    if (e.type == EventType::DUAL_CONTROL_EXECUTED)
-        return parseCommandOpId(e.opId, kResultPrefix).has_value() || parseCommandOpId(e.opId, kExpiryPrefix).has_value();
+    if (e.type == EventType::DUAL_CONTROL_EXECUTED) return parseCommandOpId(e.opId, kResultPrefix).has_value() || parseCommandOpId(e.opId, kExpiryPrefix).has_value();
     return false;
 }
 

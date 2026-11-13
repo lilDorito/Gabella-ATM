@@ -25,15 +25,12 @@ std::optional<StaffLoginResult> StaffService::staffLogin(const StaffLoginRequest
 
     std::string password;
     CryptoCore::StringWiper wiper{ password };
-    if (!_hsm.openPassword(request.sealedPassword, password) || password.empty() || password.size() > kMaxPasswordBytes)
+    if (!_hsm.openPassword(request.sealedPassword, request.binding(), password) || password.empty() || password.size() > kMaxPasswordBytes)
     {
         refuse(request, "unseal_failed");
         return std::nullopt;
     }
-    return _access.staffLogin(request.staffId, password, request.atmId);
+    return _staffAuth.staffLogin(request.staffId, password, request.atmId);
 }
 
-void StaffService::staffLogout(const std::string& token)
-{
-    _access.staffLogout(token);
-}
+void StaffService::staffLogout(const std::string& token) { _staffAuth.staffLogout(token); }

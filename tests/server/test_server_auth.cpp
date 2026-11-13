@@ -12,7 +12,7 @@
 #include "server/repo/AccountRepository.h"
 #include "server/repo/CardRepository.h"
 #include "server/db/Statement.h"
-#include "server/repo/TransactionRepository.h"
+#include "server/repo/TxRepository.h"
 #include "server/services/AuthorizationService.h"
 
 using gabella_test::check;
@@ -49,7 +49,7 @@ struct AuthRig
     ServerRig r;
     CardRepository cards{ r.db };
     AccountRepository accounts{ r.db };
-    TransactionRepository txs{ r.db };
+    TxRepository txs{ r.db };
     HookSink sink{ r.log };
     AuthorizationService service{ *r.fx.bank, r.db, r.atms, cards, accounts, txs, sink, r.clock, r.config };
     BankServer server{ *r.fx.bank, r.log, r.gate, r.atms, r.checkpointService, ServerParts{ service, r.unavailable, r.unavailable, r.unavailable, r.unavailable } };
@@ -74,12 +74,9 @@ struct AuthRig
         return *pinModule.processPin(Card(pan, 12, 2030), pin, action, amountKop, session, kRigAtm, r.clock.nowUnix());
     }
 
-    AuthResponse ask(Action action, std::int64_t amountKop, const std::string& pin = kPin, const std::string& pan = kPan)
-    {
-        return server.authorize(request(action, amountKop, pin, pan));
-    }
+    AuthResponse ask(Action action, std::int64_t amountKop, const std::string& pin = kPin, const std::string& pan = kPan) { return server.authorize(request(action, amountKop, pin, pan)); }
 
-    std::int64_t balance(const std::string& accountId = "ACC-1") { return accounts.find(accountId)->balanceKop; }
+    std::int64_t balance(const std::string& accountId = "ACC-1") { return *accounts.balance(accountId) - txs.reservedTotal(accountId); }
     std::uint32_t attempts(const std::string& pan = kPan) { return cards.find(pan)->failedPinAttempts; }
     std::uint64_t lastSeq(const std::string& atmId = kRigAtm) { return r.atms.find(atmId)->lastDispenseSeq; }
     bool takeSequence(std::uint64_t expected)
@@ -128,9 +125,9 @@ void balanceAndWithdrawalTests()
     check(!a.r.fx.atm->verifyServer(SignDomain::Command, cmd.signedPayload(), cmd.signature), "and cannot pass as a service command");
     check(a.r.fx.atm->verifyServer(SignDomain::Response, first.signedPayload(), first.signature), "the whole answer is signed too");
 
-    check(a.balance() == uah(50000) - uah(500), "the money is taken from the account");
-    const auto tx = a.txs.find(kRigAtm, 1);
-    check(tx && tx->status == "HELD" && tx->amountKop == uah(500) && tx->sessionId == "S-1" && tx->accountId == "ACC-1", "it is held in a transaction");
+    check(a.balance() == uah(50000) - uah(500), "the money is reserved on the account");
+    const auto tx = a.txs.findBySeq(kRigAtm, 1);
+    check(tx && tx->status == TxStatus::Held && tx->amountKop == uah(500) && tx->sessionId == "S-1" && tx->accountId == "ACC-1", "it is held in a transaction");
     check(a.lastSeq() == 1, "the ATM's dispense sequence moved on");
     check(a.openIntents() == 0 && a.r.count(EventType::AUTH_DECISION) == 3, "the withdrawal is logged as an intent and a result, and none is left open");
 
@@ -172,7 +169,7 @@ void limitTests()
     AuthRig a;
     check(a.ask(Action::Withdraw, uah(10100)).status == AuthStatus::LimitExceeded, "more than the per-withdrawal limit is refused");
     check(a.ask(Action::Withdraw, uah(150)).status == AuthStatus::LimitExceeded, "an amount that is not a multiple of the step is refused");
-    check(a.balance() == uah(50000) && a.lastSeq() == 0 && !a.txs.find(kRigAtm, 1), "refusals leave no trace in the money tables");
+    check(a.balance() == uah(50000) && a.lastSeq() == 0 && !a.txs.findBySeq(kRigAtm, 1), "refusals leave no trace in the money tables");
     check(a.attempts() == 0, "and a right PIN is not punished");
 
     check(a.ask(Action::Withdraw, uah(10000)).status == AuthStatus::Approved, "the per-withdrawal limit itself is allowed");
@@ -258,7 +255,7 @@ void failClosedTests()
         a.sink.failIntents = true;
         const AuthResponse blocked = a.ask(Action::Withdraw, uah(500));
         check(blocked.status == AuthStatus::Error && !blocked.command, "a withdrawal whose intent cannot be logged is refused");
-        check(a.balance() == uah(50000) && a.lastSeq() == 0 && !a.txs.find(kRigAtm, 1), "no money moves and no sequence is used");
+        check(a.balance() == uah(50000) && a.lastSeq() == 0 && !a.txs.findBySeq(kRigAtm, 1), "no money moves and no sequence is used");
         a.sink.failIntents = false;
         const AuthResponse retry = a.ask(Action::Withdraw, uah(500));
         check(retry.command && retry.command->sequence == 1, "with the log back, the first sequence is still free");
@@ -292,7 +289,7 @@ void failClosedTests()
         conflict.run();
         const AuthResponse failed = a.ask(Action::Withdraw, uah(500));
         check(failed.status == AuthStatus::Error && !failed.command, "a reservation the database refuses gives an error");
-        check(a.balance() == uah(50000) && a.lastSeq() == 0, "the debit and the sequence are rolled back");
+        check(a.balance() == uah(50000) && a.lastSeq() == 0, "the reservation and the sequence are rolled back");
         check(a.logged("reason=storage_failure") == 1 && a.openIntents() == 0, "and the intent is closed as a failure");
     }
     {
@@ -304,7 +301,7 @@ void failClosedTests()
             check(a.takeSequence(0), "setup: another request takes the sequence while this one is logged");
         };
         const AuthResponse raced = a.ask(Action::Withdraw, uah(500));
-        check(raced.status == AuthStatus::Error && !raced.command && a.balance() == uah(50000) && !a.txs.find(kRigAtm, 1), "a sequence taken in between stops the reservation");
+        check(raced.status == AuthStatus::Error && !raced.command && a.balance() == uah(50000) && !a.txs.findBySeq(kRigAtm, 1), "a sequence taken in between stops the reservation");
         check(a.openIntents() == 0 && a.logged("reason=state_changed") == 1, "the intent is closed as a failure with its reason");
     }
     {

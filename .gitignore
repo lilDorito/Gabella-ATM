@@ -28,5 +28,6 @@ logs/
 *.db-shm
 *.log
 *.anchor
+gabella-data/
 
 CMakeUserPresets.json

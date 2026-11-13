@@ -10,7 +10,7 @@
 #include "server/db/Statement.h"
 #include "server/repo/AccountRepository.h"
 #include "server/repo/CardRepository.h"
-#include "server/repo/TransactionRepository.h"
+#include "server/repo/TxRepository.h"
 #include "server/services/AuthorizationService.h"
 
 using gabella_test::check;
@@ -74,15 +74,13 @@ void usableTests()
     seedDatabase(r.db, *r.fx.bank);
     CardRepository cards(r.db);
     AccountRepository accounts(r.db);
-    TransactionRepository txs(r.db);
+    TxRepository txs(r.db);
     AuthorizationService service(*r.fx.bank, r.db, r.atms, cards, accounts, txs, r.log, r.clock, r.config);
     BankServer server(*r.fx.bank, r.log, r.gate, r.atms, r.checkpointService, ServerParts{ service, r.unavailable, r.unavailable, r.unavailable, r.unavailable });
     PinModule pinModule(*r.fx.atm);
 
     auto ask = [&](const DemoCard& card, const std::string& pin, Action action, std::int64_t amount)
-    {
-        return server.authorize(*pinModule.processPin(Card(card.pan, card.expMonth, card.expYear), pin, action, amount, "S-1", kRigAtm, r.clock.nowUnix()));
-    };
+    { return server.authorize(*pinModule.processPin(Card(card.pan, card.expMonth, card.expYear), pin, action, amount, "S-1", kRigAtm, r.clock.nowUnix())); };
 
     const auto& all = demoCards();
     const AuthResponse rich = ask(all[0], all[0].pin, Action::Withdraw, 50000);

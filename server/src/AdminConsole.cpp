@@ -17,17 +17,17 @@ std::optional<StaffIdentity> AdminConsole::adminOf(const std::string& token)
 
 std::optional<StaffLoginResult> AdminConsole::login(const std::string& staffId, const std::string& password)
 {
-    auto result = _access.staffLogin(staffId, password, kAdminConsoleAtmId);
+    auto result = _staffAuth.staffLogin(staffId, password, kAdminConsoleAtmId);
     if (!result) return std::nullopt;
     if (result->role != Role::Admin)
     {
-        _access.staffLogout(result->token);
+        _staffAuth.staffLogout(result->token);
         return std::nullopt;
     }
     return result;
 }
 
-void AdminConsole::logout(const std::string& token) { _access.staffLogout(token); }
+void AdminConsole::logout(const std::string& token) { _staffAuth.staffLogout(token); }
 
 Decision AdminConsole::createRequest(const std::string& token, Action action, const std::string& atmId, const std::string& extra)
 {
@@ -61,7 +61,7 @@ ConsoleApproval AdminConsole::approve(const std::string& token, const std::strin
     ConsoleApproval out;
     if (!adminOf(token)) return out;
 
-    out.result = _access.approve(requestId, token);
+    out.result = _approvals.approve(requestId, token);
     if (out.result == ApprovalResult::Approved) out.queued = _commands.enqueueApproved(requestId);
     return out;
 }
@@ -111,7 +111,8 @@ std::string AdminConsole::formatAtm(const AtmRecord& atm)
 
 std::string AdminConsole::formatPending(const PendingView& v)
 {
-    return v.request.requestId + "  " + actionToString(v.request.action) + "  atm=" + v.atmId + "  by=" + v.request.initiatorId + "  approvals=" + std::to_string(v.approvals) + "/" + std::to_string(v.request.requiredApprovals);
+    return v.request.requestId + "  " + actionToString(v.request.action) + "  atm=" + v.atmId + "  by=" + v.request.initiatorId + "  approvals=" + std::to_string(v.approvals) + "/"
+        + std::to_string(v.request.requiredApprovals);
 }
 
 int AdminConsole::run(std::istream& in, std::ostream& out)

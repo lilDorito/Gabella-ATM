@@ -32,15 +32,9 @@ SqliteStaffAuthenticator::SqliteStaffAuthenticator(StaffRepository& staff, IAudi
 {
 }
 
-std::string SqliteStaffAuthenticator::nextOpId(const std::string& staffId, std::int64_t now)
-{
-    return std::string(kOpPrefix) + staffId + "/" + std::to_string(now) + "-" + std::to_string(++_ops);
-}
+std::string SqliteStaffAuthenticator::nextOpId(const std::string& staffId, std::int64_t now) { return std::string(kOpPrefix) + staffId + "/" + std::to_string(now) + "-" + std::to_string(++_ops); }
 
-void SqliteStaffAuthenticator::refuse(EventType type, const std::string& staffId, const std::string& details)
-{
-    (void)recordBestEffort(_log, staffEvent(type, Outcome::Failure, staffId, details));
-}
+void SqliteStaffAuthenticator::refuse(EventType type, const std::string& staffId, const std::string& details) { (void)recordBestEffort(_log, staffEvent(type, Outcome::Failure, staffId, details)); }
 
 std::optional<Role> SqliteStaffAuthenticator::verify(const std::string& staffId, const std::string& password)
 {
@@ -108,7 +102,8 @@ void SqliteStaffAuthenticator::countFailure(const StaffRecord& staff, std::int64
     (void)_log.record(result);
 
     if (failure.locked)
-        (void)_log.record(staffEvent(EventType::STAFF_LOCKED, Outcome::Failure, staff.staffId, "attempts=" + std::to_string(failure.attempts) + " locked_until=" + std::to_string(failure.lockedUntil)));
+        (void)_log.record(
+            staffEvent(EventType::STAFF_LOCKED, Outcome::Failure, staff.staffId, "attempts=" + std::to_string(failure.attempts) + " locked_until=" + std::to_string(failure.lockedUntil)));
 }
 
 bool SqliteStaffAuthenticator::clearFailures(const StaffRecord& staff, std::int64_t now)

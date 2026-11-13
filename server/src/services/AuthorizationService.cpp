@@ -73,7 +73,7 @@ AuthorizationService::AuthorizationService(const BankHsm& hsm,
     AtmRepository& atms,
     CardRepository& cards,
     AccountRepository& accounts,
-    TransactionRepository& transactions,
+    TxRepository& transactions,
     IAuditSink& log,
     const IClock& clock,
     const SystemConfig& config)
@@ -97,10 +97,7 @@ AuthResponse AuthorizationService::unavailable(const AuthRequest& request)
     return response;
 }
 
-std::string AuthorizationService::pinOpId(const std::string& atmId)
-{
-    return std::string(kPinOpPrefix) + atmId + "/" + std::to_string(_clock.nowUnix()) + "-" + std::to_string(++_pinOps);
-}
+std::string AuthorizationService::pinOpId(const std::string& atmId) { return std::string(kPinOpPrefix) + atmId + "/" + std::to_string(_clock.nowUnix()) + "-" + std::to_string(++_pinOps); }
 
 void AuthorizationService::closeIntent(const AuthRequest& request, const LogEvent& intent, Outcome outcome, const std::string& details)
 {
@@ -200,8 +197,8 @@ bool AuthorizationService::resetPin(const AuthRequest& request)
 AuthResponse AuthorizationService::balance(const AuthRequest& request)
 {
     const auto card = _cards.find(request.getPan());
-    const auto account = card ? _accounts.find(card->accountId) : std::nullopt;
-    const auto money = account ? Money::fromKop(account->balanceKop) : std::nullopt;
+    const auto available = card ? availableKop(card->accountId) : std::nullopt;
+    const auto money = available ? Money::fromKop(*available) : std::nullopt;
     if (!money) return refuse(request, AuthStatus::Error, "reason=account_unavailable");
 
     if (!_log.record(decisionEvent(request, Outcome::Success, "status=Approved"))) return unavailable(request);
@@ -213,6 +210,13 @@ AuthResponse AuthorizationService::balance(const AuthRequest& request)
     return response;
 }
 
+std::optional<std::int64_t> AuthorizationService::availableKop(const std::string& accountId) const
+{
+    const auto balance = _accounts.balance(accountId);
+    if (!balance) return std::nullopt;
+    return *balance - _transactions.reservedTotal(accountId);
+}
+
 std::optional<AuthStatus> AuthorizationService::withdrawalRefusal(const CardRecord& card, std::int64_t amountKop, std::int64_t now, std::string& reason) const
 {
     const auto money = Money::fromKop(amountKop);
@@ -222,21 +226,21 @@ std::optional<AuthStatus> AuthorizationService::withdrawalRefusal(const CardReco
         return AuthStatus::LimitExceeded;
     }
 
-    const auto account = _accounts.find(card.accountId);
-    if (!account)
+    const auto available = availableKop(card.accountId);
+    if (!available)
     {
         reason = "reason=account_unavailable";
         return AuthStatus::Error;
     }
 
-    const std::int64_t withdrawn = _transactions.withdrawnSince(card.accountId, now - kSecondsPerDay);
+    const std::int64_t withdrawn = _transactions.dailyTotal(card.accountId, now - kSecondsPerDay);
     if (amountKop > _config.dailyWithdrawalLimitKop - withdrawn)
     {
         reason = "reason=limit_daily";
         return AuthStatus::LimitExceeded;
     }
 
-    if (amountKop > account->balanceKop)
+    if (amountKop > *available)
     {
         reason = "reason=insufficient_funds";
         return AuthStatus::InsufficientFunds;
@@ -280,10 +284,9 @@ AuthResponse AuthorizationService::withdraw(const AuthRequest& request)
         reservation.reason = "reason=storage_failure";
     }
 
-    closeIntent(request,
-        intent,
-        reservation.done ? Outcome::Success : Outcome::Failure,
-        std::string("status=") + authStatusToString(reservation.status) + " seq=" + std::to_string(command.sequence) + (reservation.done ? " tx=" + std::to_string(reservation.txId) : " " + reservation.reason));
+    closeIntent(request, intent, reservation.done ? Outcome::Success : Outcome::Failure,
+        std::string("status=") + authStatusToString(reservation.status) + " seq=" + std::to_string(command.sequence)
+            + (reservation.done ? " tx=" + std::to_string(reservation.txId) : " " + reservation.reason));
 
     AuthResponse response;
     response.status = reservation.status;
@@ -319,11 +322,6 @@ AuthorizationService::Reservation AuthorizationService::reserve(const AuthReques
         return reservation;
     }
 
-    if (!_accounts.debit(card->accountId, command.amountKop))
-    {
-        reservation.reason = "reason=debit_failed";
-        return reservation;
-    }
     if (!advanceDispenseSeq(_db, command.atmId, atm->lastDispenseSeq))
     {
         reservation.reason = "reason=state_changed";
@@ -359,7 +357,7 @@ std::optional<LogEvent> AuthorizationService::resolve(const LogEntry& intent)
     const auto target = parseOpId(result.opId);
     if (!target) return std::nullopt;
 
-    const bool stored = _transactions.find(target->first, target->second).has_value();
+    const bool stored = _transactions.findBySeq(target->first, target->second).has_value();
     result.outcome = stored ? Outcome::Success : Outcome::Failure;
     result.details += stored ? " recovered=committed" : " recovered=absent";
     return result;

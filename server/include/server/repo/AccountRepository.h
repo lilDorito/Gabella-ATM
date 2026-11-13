@@ -22,5 +22,6 @@ public:
 
     void insert(const AccountRecord& account);
     std::optional<AccountRecord> find(const std::string& accountId) const;
+    std::optional<std::int64_t> balance(const std::string& accountId) const;
     [[nodiscard]] bool debit(const std::string& accountId, std::int64_t amountKop);
 };

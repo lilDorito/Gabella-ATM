@@ -12,11 +12,14 @@
 
 #include "access/AccessControl.h"
 #include "access/ApprovalPolicy.h"
+#include "access/ApprovalService.h"
 #include "access/DualControlManager.h"
 #include "access/PermissionTable.h"
 #include "access/SessionRegistry.h"
+#include "access/StaffAuthService.h"
 #include "access/StaffTokenStore.h"
 #include "audit/IAuditSink.h"
+#include "common/Canonical.h"
 #include "common/Clock.h"
 #include "crypto/BankHsm.h"
 #include "crypto/CryptoCore.h"
@@ -96,8 +99,7 @@ public:
         {
             if (events[i].opId.empty() || events[i].outcome != Outcome::Info) continue;
             bool closed = false;
-            for (std::size_t j = i + 1; j < events.size(); ++j)
-                closed = closed || (events[j].opId == events[i].opId && events[j].outcome != Outcome::Info);
+            for (std::size_t j = i + 1; j < events.size(); ++j) closed = closed || (events[j].opId == events[i].opId && events[j].outcome != Outcome::Info);
             if (!closed) return false;
         }
         return true;
@@ -129,7 +131,10 @@ inline std::unique_ptr<BankHsm> makeBankHsm()
     crypto_sign_keypair(signPublic.data(), signSecret.data());
     crypto_box_keypair(boxPublic.data(), boxSecret.data());
     const auto key = [] { return *CryptoCore::randomBytes(16); };
-    return std::make_unique<BankHsm>(key(), key(), key(), key(), key(), signPublic, signSecret, boxPublic, boxSecret);
+    auto hsm = std::make_unique<BankHsm>(key(), key(), signPublic, signSecret, boxPublic, boxSecret);
+    for (const std::string& atmId : { kAtmA, kAtmB })
+        if (!hsm->provisionAtm(atmId, AtmKeySet{ key(), key(), key(), key() })) throw std::runtime_error("cannot provision " + atmId);
+    return hsm;
 }
 
 struct StaffRig
@@ -151,12 +156,14 @@ struct StaffRig
     StaffTokenStore tokens{ clock, [](std::size_t n) { return CryptoCore::randomBytes(n); }, config.staffTokenIdleSeconds, config.staffTokenMaxSeconds };
     DualControlManager dual{ requests, policy, clock, log, [](std::size_t n) { return CryptoCore::randomBytes(n); }, [this] { return staff.countActiveAdmins(); } };
     SqliteStaffAuthenticator authenticator{ staff, log, clock, config, fakeCheck(), fakeHash("dummy-password-nobody-has") };
-    AccessControl access{ permissions, dual, sessions, tokens, authenticator, log };
+    AccessControl access{ permissions, dual, sessions, tokens, log };
+    StaffAuthService staffAuth{ tokens, authenticator, log };
+    ApprovalService approvals{ tokens, dual };
 
-    StaffService staffService{ *hsm, access, log };
+    StaffService staffService{ *hsm, staffAuth, log };
     AccessDecider decider{ access, policy, atms, log };
     CommandService commands{ *hsm, db, atms, commandQueue, dual, requests, log, clock, config };
-    AdminConsole console{ access, tokens, dual, commands, atms, log };
+    AdminConsole console{ access, staffAuth, approvals, tokens, dual, commands, atms, log };
 
     StaffRig()
     {
@@ -178,11 +185,12 @@ struct StaffRig
         staff.insert(s);
     }
 
-    std::string seal(const std::string& password) const
+    std::string seal(const std::string& password, const std::string& binding) const
     {
         const auto pk = hsm->boxPublicKey();
-        std::string sealed(password.size() + crypto_box_SEALBYTES, '\0');
-        crypto_box_seal(reinterpret_cast<unsigned char*>(&sealed[0]), reinterpret_cast<const unsigned char*>(password.data()), password.size(), pk.data());
+        const std::string framed = canonicalEncode("PWD:", { binding, password });
+        std::string sealed(framed.size() + crypto_box_SEALBYTES, '\0');
+        crypto_box_seal(reinterpret_cast<unsigned char*>(&sealed[0]), reinterpret_cast<const unsigned char*>(framed.data()), framed.size(), pk.data());
         return sealed;
     }
 
@@ -191,9 +199,9 @@ struct StaffRig
         StaffLoginRequest r;
         r.atmId = atmId;
         r.staffId = staffId;
-        r.sealedPassword = seal(password);
         r.nonce = "n";
         r.timestamp = clock.nowUnix();
+        r.sealedPassword = seal(password, r.binding());
         return r;
     }
 
@@ -214,8 +222,7 @@ struct StaffRig
         const std::string first = consoleToken("A-01");
         const Decision d = console.createRequest(first, action, atmId, extra);
         if (d.verdict != Verdict::PendingApproval) return std::string();
-        for (int i = 1; i < approvers; ++i)
-            (void)console.approve(consoleToken(i == 1 ? "A-02" : "A-03"), d.requestId);
+        for (int i = 1; i < approvers; ++i) (void)console.approve(consoleToken(i == 1 ? "A-02" : "A-03"), d.requestId);
         return d.requestId;
     }
 

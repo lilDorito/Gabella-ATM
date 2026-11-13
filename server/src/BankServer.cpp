@@ -124,16 +124,23 @@ bool BankServer::reportTamper(const RequestHeader& header)
     return guarded<bool>("ReportTamper",
         [&]
         {
-            if (!admitted(ApiCall::ReportTamper, header, ApiBody::empty(), true)) return false;
-            const bool stopped = _atms.setStatus(header.atmId, AtmStatus::OutOfService);
+            bool authenticated = false;
+            if (!header.mac.empty())
+            {
+                const GateVerdict verdict = _gate.admit(ApiCall::ReportTamper, header, ApiBody::empty(), true);
+                authenticated = verdict == GateVerdict::Admitted;
+                if (!authenticated && verdict != GateVerdict::BadMac) return false;
+            }
+            if (!_atms.find(header.atmId)) return false;
+
             LogEvent e;
             e.type = EventType::TAMPER_DETECTED;
             e.outcome = Outcome::Failure;
             e.actorRole = Role::System;
             e.actorId = header.atmId;
-            e.details = "source=atm_report";
+            e.details = std::string("source=atm_report authenticated=") + (authenticated ? "yes" : "no");
             (void)_log.record(e);
-            return stopped;
+            return _atms.setStatus(header.atmId, AtmStatus::OutOfService);
         });
 }
 

@@ -21,6 +21,14 @@ std::optional<AccountRecord> AccountRepository::find(const std::string& accountI
     return account;
 }
 
+std::optional<std::int64_t> AccountRepository::balance(const std::string& accountId) const
+{
+    Statement s(_db, "SELECT balance_kop FROM accounts WHERE account_id = ?");
+    s.bind(1, accountId);
+    if (!s.step()) return std::nullopt;
+    return s.columnInt64(0);
+}
+
 bool AccountRepository::debit(const std::string& accountId, std::int64_t amountKop)
 {
     if (amountKop <= 0) return false;

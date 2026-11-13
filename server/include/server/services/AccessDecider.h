@@ -19,10 +19,7 @@ private:
     Decision deny(DenyReason reason, const AccessRequest& request);
 
 public:
-    AccessDecider(AccessControl& access, const ApprovalPolicy& policy, AtmRepository& atms, IAuditSink& log)
-        : _access(access), _policy(policy), _atms(atms), _log(log)
-    {
-    }
+    AccessDecider(AccessControl& access, const ApprovalPolicy& policy, AtmRepository& atms, IAuditSink& log) : _access(access), _policy(policy), _atms(atms), _log(log) {}
 
     [[nodiscard]] Decision decide(const AccessRequest& request) override;
 };

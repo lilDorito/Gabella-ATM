@@ -55,7 +55,14 @@ void staffRepositoryTests()
     bad.role = Role::System;
     bad.passwordHash = fakeHash("x");
     bool threw = false;
-    try { r.staff.insert(bad); } catch (const DbError&) { threw = true; }
+    try
+    {
+        r.staff.insert(bad);
+    }
+    catch (const DbError&)
+    {
+        threw = true;
+    }
     check(threw, "the System role cannot be stored as staff");
 
     bool plain = false;
@@ -63,7 +70,14 @@ void staffRepositoryTests()
     weak.staffId = "X-02";
     weak.role = Role::Auditor;
     weak.passwordHash = "plaintext";
-    try { r.staff.insert(weak); } catch (const DbError&) { plain = true; }
+    try
+    {
+        r.staff.insert(weak);
+    }
+    catch (const DbError&)
+    {
+        plain = true;
+    }
     check(plain, "the schema refuses a password hash that is not argon2id");
 
     const std::int64_t now = kStart;
@@ -244,10 +258,11 @@ void accessDeciderTests()
     check(oos.verdict == Verdict::Denied && oos.reason == DenyReason::AtmOutOfService, "an out-of-service ATM is refused");
     check(r.atms.setStatus(kAtmA, AtmStatus::Active), "the ATM is back in service");
 
-    const auto admin = r.login("A-01");
+    check(!r.login("A-01"), "an admin cannot sign in at an ATM");
+    const std::string adminToken = r.tokens.issue("A-01", Role::Admin, kAtmA);
     AccessRequest critical;
     critical.atmId = kAtmA;
-    critical.staffToken = admin->token;
+    critical.staffToken = adminToken;
     critical.action = Action::UpdateWorkingKey;
     critical.params = "Mac";
     const Decision pending = r.decider.decide(critical);
@@ -305,7 +320,12 @@ void dualControlRepositoryTests()
         req.expiresAt = kStart + 1800;
         const bool rolledBack = !r.requests.inTransaction([&] { return r.requests.insertRequest(req) && false; });
         check(rolledBack && !r.requests.find(req.requestId), "a transaction that returns false leaves nothing behind");
-        const bool thrown = !r.requests.inTransaction([&]() -> bool { (void)r.requests.insertRequest(req); throw std::runtime_error("boom"); });
+        const bool thrown = !r.requests.inTransaction(
+            [&]() -> bool
+            {
+                (void)r.requests.insertRequest(req);
+                throw std::runtime_error("boom");
+            });
         check(thrown && !r.requests.find(req.requestId), "a transaction that throws is rolled back");
         check(r.requests.inTransaction([&] { return r.requests.insertRequest(req) && r.requests.insertApproval(req.requestId, "A-01", kStart); }), "a good transaction commits");
         check(!r.requests.insertRequest(req), "the same request id cannot be inserted twice");
@@ -403,7 +423,7 @@ void commandTests()
         const std::string first = r.consoleToken("A-01");
         const Decision d = r.console.createRequest(first, Action::RestoreFromOutOfService, kAtmA);
         r.log.down = true;
-        const ApprovalResult res = r.access.approve(d.requestId, r.consoleToken("A-02"));
+        const ApprovalResult res = r.approvals.approve(d.requestId, r.consoleToken("A-02"));
         r.log.down = false;
         check(res != ApprovalResult::Approved, "no approval is stored while the log is down");
         check(r.commands.enqueueApproved(d.requestId) == EnqueueResult::NotApproved, "a pending request cannot be queued");
@@ -412,7 +432,7 @@ void commandTests()
         StaffRig r;
         const std::string first = r.consoleToken("A-01");
         const Decision d = r.console.createRequest(first, Action::RestoreFromOutOfService, kAtmA);
-        check(r.access.approve(d.requestId, r.consoleToken("A-02")) == ApprovalResult::Approved, "approved without going through the console");
+        check(r.approvals.approve(d.requestId, r.consoleToken("A-02")) == ApprovalResult::Approved, "approved without going through the console");
         check(r.commands.pollCommands(kAtmA).empty(), "so no command exists yet (a crash between approval and queueing)");
         check(r.commands.tick() == 1 && r.commands.pollCommands(kAtmA).size() == 1, "tick queues the forgotten approval");
         check(r.commands.tick() == 0, "and does it only once");
@@ -434,13 +454,13 @@ void commandTests()
         check(!commands.empty() && r.commandSignatureValid(commands[0]), "the blob is covered by the signature");
         check(!r.log.anyDetailContains(commands[0].params.substr(4)), "the key blob is not written to the log");
 
-        const std::string second = r.approvedRequest(Action::UpdateWorkingKey, kAtmB, "Mac");
-        check(!second.empty() && r.commandQueue.findByRequest(second) == std::nullopt, "a second Mac update cannot start while the first is pending");
+        const std::string second = r.approvedRequest(Action::UpdateWorkingKey, kAtmA, "Mac");
+        check(!second.empty() && r.commandQueue.findByRequest(second) == std::nullopt, "a second Mac update for the same ATM cannot start while the first is pending");
         check(r.commands.enqueueApproved(second) == EnqueueResult::KeyUnavailable, "the refusal says the key is unavailable");
 
         check(r.commands.reportCommandResult(kAtmA, 1, true), "the ATM confirms the new key");
         check(r.requests.find(id)->status == RequestStatus::Executed, "the request is Executed");
-        check(!r.hsm->commitWorkingKey(KeyType::Mac), "the bank has already switched: nothing is left pending");
+        check(!r.hsm->commitWorkingKey(kAtmA, KeyType::Mac), "the bank has already switched: nothing is left pending");
         check(r.log.count(EventType::KEY_UPDATED) == 1, "the key switch is logged");
     }
     {
@@ -448,9 +468,9 @@ void commandTests()
         const std::string id = r.approvedRequest(Action::UpdateWorkingKey, kAtmA, "Audit");
         check(r.commands.pollCommands(kAtmA).size() == 1, "an Audit key update is queued");
         check(r.commands.reportCommandResult(kAtmA, 1, false), "the ATM reports that it failed");
-        check(!r.hsm->commitWorkingKey(KeyType::Audit), "the pending key was dropped, the bank keeps the old one");
+        check(!r.hsm->commitWorkingKey(kAtmA, KeyType::Audit), "the pending key was dropped, the bank keeps the old one");
         check(r.requests.find(id)->status == RequestStatus::Approved, "the request stays Approved");
-        check(r.hsm->prepareWorkingKey(KeyType::Audit).has_value(), "a new attempt can start");
+        check(r.hsm->prepareWorkingKey(kAtmA, KeyType::Audit).has_value(), "a new attempt can start");
     }
     {
         StaffRig r;
@@ -460,7 +480,7 @@ void commandTests()
         check(r.commands.pollCommands(kAtmA).empty(), "an expired command is not offered to the ATM");
         check(r.commands.tick() >= 1, "tick closes the expired command");
         check(r.commandQueue.find(kAtmA, 1)->status == CommandStatus::Failed, "it is stored as FAILED");
-        check(r.hsm->prepareWorkingKey(KeyType::Mac).has_value(), "its pending key was dropped");
+        check(r.hsm->prepareWorkingKey(kAtmA, KeyType::Mac).has_value(), "its pending key was dropped");
         check(r.requests.find(id)->status != RequestStatus::Executed, "an expired command never executes the request");
         check(r.log.everyIntentIsClosed(), "the expiry is logged as intent and result");
     }
@@ -499,7 +519,8 @@ void consoleTests()
     const auto list = r.console.atms(token);
     check(list.size() == 2, "the console lists both ATMs");
     check(list.size() == 2 && AdminConsole::formatAtm(list[0]).find("CHECK THE LOG") == std::string::npos, "a clean ATM has no flag");
-    check(list.size() == 2 && AdminConsole::formatAtm(list[1]).find("CHECK THE LOG") != std::string::npos && AdminConsole::formatAtm(list[1]).find("OUT_OF_SERVICE") != std::string::npos, "the flagged ATM shows CHECK THE LOG");
+    check(list.size() == 2 && AdminConsole::formatAtm(list[1]).find("CHECK THE LOG") != std::string::npos && AdminConsole::formatAtm(list[1]).find("OUT_OF_SERVICE") != std::string::npos,
+        "the flagged ATM shows CHECK THE LOG");
 
     check(r.console.createRequest(token, Action::RestoreFromOutOfService, "ATM-404").verdict == Verdict::Denied, "a request for an unknown ATM is refused");
     check(r.console.createRequest(token, Action::RestoreFromOutOfService, "A|B").verdict == Verdict::Denied, "a malformed ATM id is refused");
@@ -521,7 +542,8 @@ void consoleTests()
     std::istringstream in("help\nlogin A-01 S3cretPass\natms\nrequest RestoreFromOutOfService ATM-001\npending\nlogout\nquit\n");
     std::ostringstream out;
     check(scripted.console.run(in, out) == 0, "the console loop ends cleanly");
-    check(out.str().find("ATM-001") != std::string::npos && out.str().find("waiting for approvals") != std::string::npos && out.str().find("approvals=1/2") != std::string::npos, "a scripted session creates a request and lists it");
+    check(out.str().find("ATM-001") != std::string::npos && out.str().find("waiting for approvals") != std::string::npos && out.str().find("approvals=1/2") != std::string::npos,
+        "a scripted session creates a request and lists it");
 }
 
 void argon2Tests()
