@@ -2,9 +2,6 @@
 #include <optional>
 #include <string>
 
-// params of a dual control request that targets one ATM: "atm=<atmId>" or "atm=<atmId>|<extra>".
-// The target ATM is part of the signed-off request, so approving a request for ATM-001 can never
-// produce a command for ATM-002.
 struct CommandTarget
 {
     std::string atmId;

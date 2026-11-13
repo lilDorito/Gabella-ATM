@@ -16,7 +16,7 @@ The experiment asks what an ATM looks like if you assume its own software can be
 4. The server checks the MAC, the nonce and the PIN, reserves the money and replies with an Ed25519-signed answer. A withdrawal answer carries a signed dispense command with a sequence number and a 60-second lifetime. Reserved money is no longer available, but it leaves the account only when the dispense is confirmed.
 5. The dispenser checks that command **itself**: signature, ATM ID, expiry, then the sequence number, which it stores so it survives restarts. Only then does it pay out.
 6. Every step is written to a hash-chained audit log first. If the log cannot write, the ATM goes out of service instead of continuing.
-7. The ATM reports the result with its cassette counts. The server commits the transaction if the notes are gone and reverses it if they are not. With no report within 2 minutes the transaction becomes uncertain and the money stays reserved until the ATM reconnects and its counters settle it, or two admins resolve it.
+7. The ATM reports the result with its cassette counts. The server commits the transaction if the notes are gone and reverses it if they are not. With no report within 2 minutes the transaction becomes uncertain and the money stays reserved until the ATM reconnects and its counters settle it. Until then the ATM gets no new withdrawals. After 24 hours an unsettled transaction is listed in the admin console, and two admins decide it, with a reason.
 
 **Staff** sign in at the ATM's service menu. The password is sealed to the server's public key, bound to that login attempt, and the server returns a short-lived token. Each menu action is then checked with the server:
 
@@ -92,13 +92,13 @@ Thirteen test programs, run by `ctest`:
 | `test_access` | 127 | permissions, approval thresholds, tokens, login, dual control end to end |
 | `test_server_core` | 61 | schema and its protections, transactions, repositories, request gate, facade error handling, tamper reports |
 | `test_server_audit` | 57 | server log, checkpoint acceptance, rollback detection, signed checkpoint replies, crash recovery |
-| `test_server_auth` | 87 | PIN checks and lockout, reservations, limits, races, crash recovery |
+| `test_server_auth` | 89 | PIN checks and lockout, reservations, limits, races, crash recovery |
 | `test_seed_db` | 14 | the demo data works against the real services |
 | `test_link` | 77 | `ServerLink` and the pending report queue: outages, retries, restarts |
 | `test_reconciliation` | 93 | commit, reversal and uncertain transactions, cassette counts, cash loading and collection |
 | `test_link_integration` | 36 | the real link against the real server |
-| `test_staff_access` | 170 | staff login, access decisions, dual control in SQLite, signed commands, key rotation, admin console |
-| `test_server_flow` | 26 | money end to end: every withdrawal is paid exactly once, failures cost nothing |
+| `test_staff_access` | 188 | staff login, access decisions, dual control in SQLite, signed commands, key rotation, admin console, disputed transactions |
+| `test_server_flow` | 42 | money end to end: every withdrawal is paid exactly once, failures cost nothing, one open withdrawal per ATM, client sessions |
 
 A good share of them are **attack tests**: jackpotting through the service port, a card skimmer, skipping a step in the session, replaying commands after a restart, holding back a dispense command, moving a captured PIN or password into a new request, and editing, truncating or rewriting the log. Each one has to end in a refusal.
 
@@ -119,10 +119,10 @@ It exits with 0 for an intact log, 1 for damage and 2 for a usage or read error.
 | Mode | What it does |
 |---|---|
 | `gabella_bank` or `gabella_bank demo` | a withdrawal, a balance check and a log audit run end to end, then the results are checked |
-| `gabella_bank atm` | drive ATM-001 by hand: `card <pan> <mm> <yyyy>`, `service`, `commands`, `tamper`, `status` |
-| `gabella_bank admin` | the administrator console: list ATMs, open and approve dual-control requests |
+| `gabella_bank atm` | drive ATM-001 by hand: `card 1` inserts a demo card (or `card <pan> <mm> <yyyy>` any card), then `service`, `commands`, `tamper`, `status`, `help` |
+| `gabella_bank admin` | the administrator console: list ATMs, open and approve dual-control requests, resolve disputed transactions |
 
-On every start the server verifies its log and closes any operation that a crash left half done. The demo cards and staff are listed by `help` in ATM mode; every staff password is `S3cretPass`.
+In a terminal the ATM draws framed screens with colour (set `NO_COLOR` to turn colour off), and the PIN and password are hidden as you type. On every start the server verifies its log and closes any operation that a crash left half done. The demo cards and staff are listed by `help` in ATM mode; every staff password is `S3cretPass`.
 
 A full recovery, for example: `tamper` in ATM mode, then in the admin console `login A-01 S3cretPass`, `request RestoreFromOutOfService ATM-001`, `logout`, `login A-02 S3cretPass`, `approve <id>`, and back in ATM mode `commands`.
 

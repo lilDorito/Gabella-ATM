@@ -16,7 +16,6 @@ void StaffService::refuse(const StaffLoginRequest& request, const std::string& r
 
 std::optional<StaffLoginResult> StaffService::staffLogin(const StaffLoginRequest& request)
 {
-    // The console id belongs to the server's own console; no ATM may claim it.
     if (request.staffId.empty() || request.atmId.empty() || request.atmId == kAdminConsoleAtmId)
     {
         refuse(request, "bad_request");

@@ -4,7 +4,6 @@
 
 #include "common/Action.h"
 
-// Action has no parser of its own; the names are the ones actionToString() writes.
 inline std::optional<Action> actionFromString(const std::string& text)
 {
     for (int i = 0; i < 64; ++i)

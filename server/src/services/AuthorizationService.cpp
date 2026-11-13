@@ -74,6 +74,7 @@ AuthorizationService::AuthorizationService(const BankHsm& hsm,
     CardRepository& cards,
     AccountRepository& accounts,
     TxRepository& transactions,
+    SessionRegistry& sessions,
     IAuditSink& log,
     const IClock& clock,
     const SystemConfig& config)
@@ -83,6 +84,7 @@ AuthorizationService::AuthorizationService(const BankHsm& hsm,
       _cards(cards),
       _accounts(accounts),
       _transactions(transactions),
+      _sessions(sessions),
       _log(log),
       _clock(clock),
       _config(config)
@@ -109,7 +111,6 @@ void AuthorizationService::closeIntent(const AuthRequest& request, const LogEven
 
 AuthResponse AuthorizationService::refuse(const AuthRequest& request, AuthStatus status, const std::string& reason)
 {
-    // A decision that cannot be written to the log is not given: the answer becomes Error.
     if (!_log.record(decisionEvent(request, Outcome::Failure, std::string("status=") + authStatusToString(status) + " " + reason))) return unavailable(request);
 
     AuthResponse response;
@@ -124,6 +125,9 @@ AuthResponse AuthorizationService::authorize(const AuthRequest& request)
     if (action != Action::CheckBalance && action != Action::Withdraw) return refuse(request, AuthStatus::Declined, "reason=unsupported_action");
     if (action == Action::CheckBalance && request.getAmount() != 0) return refuse(request, AuthStatus::Declined, "reason=invalid_amount");
     if (action == Action::Withdraw && request.getAmount() <= 0) return refuse(request, AuthStatus::Declined, "reason=invalid_amount");
+
+    _sessions.purgeExpired();
+    if (_sessions.isClosed(request.getSessionId())) return refuse(request, AuthStatus::Declined, "reason=session_closed");
 
     const auto card = _cards.find(request.getPan());
     if (!card) return refuse(request, AuthStatus::Declined, "reason=unknown_card");
@@ -203,6 +207,7 @@ AuthResponse AuthorizationService::balance(const AuthRequest& request)
 
     if (!_log.record(decisionEvent(request, Outcome::Success, "status=Approved"))) return unavailable(request);
 
+    _sessions.open(request.getSessionId());
     AuthResponse response;
     response.status = AuthStatus::Approved;
     response.sessionId = request.getSessionId();
@@ -217,8 +222,14 @@ std::optional<std::int64_t> AuthorizationService::availableKop(const std::string
     return *balance - _transactions.reservedTotal(accountId);
 }
 
-std::optional<AuthStatus> AuthorizationService::withdrawalRefusal(const CardRecord& card, std::int64_t amountKop, std::int64_t now, std::string& reason) const
+std::optional<AuthStatus> AuthorizationService::withdrawalRefusal(const std::string& atmId, const CardRecord& card, std::int64_t amountKop, std::int64_t now, std::string& reason) const
 {
+    if (!_transactions.findOpenByAtm(atmId).empty())
+    {
+        reason = "reason=unreconciled_withdrawal";
+        return AuthStatus::Declined;
+    }
+
     const auto money = Money::fromKop(amountKop);
     if (!money || amountKop > _config.maxWithdrawalKop || !money->isMultipleOf(_config.withdrawalStepKop))
     {
@@ -257,7 +268,7 @@ AuthResponse AuthorizationService::withdraw(const AuthRequest& request)
     if (!atm || !card || atm->status != AtmStatus::Active) return refuse(request, AuthStatus::Error, "reason=state_unavailable");
 
     std::string reason;
-    if (const auto refusal = withdrawalRefusal(*card, request.getAmount(), now, reason)) return refuse(request, *refusal, reason);
+    if (const auto refusal = withdrawalRefusal(request.getAtmId(), *card, request.getAmount(), now, reason)) return refuse(request, *refusal, reason);
 
     DispenseCommand command;
     command.atmId = request.getAtmId();
@@ -288,6 +299,7 @@ AuthResponse AuthorizationService::withdraw(const AuthRequest& request)
         std::string("status=") + authStatusToString(reservation.status) + " seq=" + std::to_string(command.sequence)
             + (reservation.done ? " tx=" + std::to_string(reservation.txId) : " " + reservation.reason));
 
+    if (reservation.done) _sessions.open(request.getSessionId());
     AuthResponse response;
     response.status = reservation.status;
     response.sessionId = request.getSessionId();
@@ -315,7 +327,7 @@ AuthorizationService::Reservation AuthorizationService::reserve(const AuthReques
     }
 
     std::string reason;
-    if (const auto refusal = withdrawalRefusal(*card, command.amountKop, now, reason))
+    if (const auto refusal = withdrawalRefusal(command.atmId, *card, command.amountKop, now, reason))
     {
         reservation.status = *refusal;
         reservation.reason = reason;
@@ -335,7 +347,12 @@ AuthorizationService::Reservation AuthorizationService::reserve(const AuthReques
     return reservation;
 }
 
-bool AuthorizationService::endSession(const std::string& atmId, const std::string&) { return _atms.find(atmId).has_value(); }
+bool AuthorizationService::endSession(const std::string& atmId, const std::string& sessionId)
+{
+    if (!_atms.find(atmId)) return false;
+    _sessions.close(sessionId);
+    return true;
+}
 
 bool AuthorizationService::owns(const LogEntry& intent) const
 {
@@ -348,7 +365,6 @@ std::optional<LogEvent> AuthorizationService::resolve(const LogEntry& intent)
     LogEvent result = intent.getEvent();
     if (isPinOp(result.opId))
     {
-        // A PIN counter change leaves no record of its own to look up, so the outcome cannot be established.
         result.outcome = Outcome::Failure;
         result.details += " recovered=unverified";
         return result;

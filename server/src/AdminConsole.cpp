@@ -62,8 +62,50 @@ ConsoleApproval AdminConsole::approve(const std::string& token, const std::strin
     if (!adminOf(token)) return out;
 
     out.result = _approvals.approve(requestId, token);
-    if (out.result == ApprovalResult::Approved) out.queued = _commands.enqueueApproved(requestId);
+    if (out.result != ApprovalResult::Approved) return out;
+
+    const auto request = _dual.get(requestId);
+    if (request && request->action == Action::ResolveTransaction)
+        out.resolved = _disputes.executeApproved(requestId);
+    else
+        out.queued = _commands.enqueueApproved(requestId);
     return out;
+}
+
+Decision AdminConsole::proposeResolution(const std::string& token, std::int64_t txId, bool commit, const std::string& reason)
+{
+    Decision refused;
+    refused.verdict = Verdict::Denied;
+    refused.reason = DenyReason::NotLoggedIn;
+    if (!adminOf(token)) return refused;
+
+    refused.reason = DenyReason::NotPermitted;
+    for (const TxRecord& tx : _disputes.disputed())
+    {
+        if (tx.id != txId) continue;
+        const auto params = DisputeService::makeParams(tx, commit, reason);
+        if (!params) return refused;
+
+        AccessRequest request;
+        request.atmId = kAdminConsoleAtmId;
+        request.staffToken = token;
+        request.action = Action::ResolveTransaction;
+        request.params = *params;
+        return _access.decide(request);
+    }
+    return refused;
+}
+
+std::vector<TxRecord> AdminConsole::disputes(const std::string& token)
+{
+    if (!adminOf(token)) return {};
+    return _disputes.disputed();
+}
+
+std::string AdminConsole::formatDispute(const TxRecord& tx, std::int64_t now)
+{
+    return "tx=" + std::to_string(tx.id) + "  " + tx.atmId + "  amount=" + std::to_string(tx.amountKop / 100) + " UAH  seq=" + std::to_string(tx.dispenseSeq)
+        + "  uncertain_for=" + std::to_string((now - tx.createdAt) / 3600) + "h";
 }
 
 std::vector<PendingView> AdminConsole::pending(const std::string& token)
@@ -135,7 +177,8 @@ int AdminConsole::run(std::istream& in, std::ostream& out)
         }
         if (cmd == "help")
         {
-            out << "login <staffId> <password> | atms | pending | request <Action> <atmId> [extra] | approve <requestId> | logout | quit\n";
+            out << "login <staffId> <password> | atms | pending | request <Action> <atmId> [extra] | approve <requestId>\n"
+                   "disputes | resolve <txId> commit|reverse <reason> | logout | quit\n";
         }
         else if (cmd == "login")
         {
@@ -191,7 +234,31 @@ int AdminConsole::run(std::istream& in, std::ostream& out)
             const ConsoleApproval a = approve(token, id);
             out << approvalResultToString(a.result);
             if (a.queued) out << " (command: " << enqueueResultToString(*a.queued) << ")";
+            if (a.resolved) out << " (resolution: " << resolveResultToString(*a.resolved) << ")";
             out << "\n";
+        }
+        else if (cmd == "disputes")
+        {
+            const auto list = disputes(token);
+            if (list.empty()) out << "no disputed transactions\n";
+            for (const TxRecord& tx : list) out << formatDispute(tx, _clock.nowUnix()) << "\n";
+        }
+        else if (cmd == "resolve")
+        {
+            std::int64_t txId = 0;
+            std::string decision, word, reason;
+            words >> txId >> decision;
+            while (words >> word) reason += (reason.empty() ? "" : "_") + word;
+            if (txId <= 0 || (decision != "commit" && decision != "reverse") || reason.empty())
+            {
+                out << "usage: resolve <txId> commit|reverse <reason>\n";
+                continue;
+            }
+            const Decision d = proposeResolution(token, txId, decision == "commit", reason);
+            if (d.verdict == Verdict::PendingApproval)
+                out << "request " << d.requestId << " opened, another admin must approve it\n";
+            else
+                out << "refused: " << denyReasonToString(d.reason) << "\n";
         }
         else
             out << "unknown command, type help\n";

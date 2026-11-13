@@ -41,6 +41,7 @@
 #include "server/services/AuthorizationService.h"
 #include "server/services/CheckpointService.h"
 #include "server/services/CommandService.h"
+#include "server/services/DisputeService.h"
 #include "server/services/PasswordVerifier.h"
 #include "server/services/ReconciliationService.h"
 #include "server/services/StaffAuthenticator.h"
@@ -97,12 +98,13 @@ struct BankNode
 
     RequestGate gate{ hsm, atms, nonces, log, clock, config };
     CheckpointService checkpointService{ hsm, checkpoints, atms, tokens, log, clock, config };
-    AuthorizationService authorization{ hsm, db, atms, cards, accounts, txs, log, clock, config };
+    AuthorizationService authorization{ hsm, db, atms, cards, accounts, txs, sessions, log, clock, config };
     AccessDecider decider{ access, policy, atms, log };
     ReconciliationService reconciliation{ db, txs, accounts, cassettes, decider, log, clock, config };
     StaffService staffService{ hsm, staffAuth, log };
     CommandService commands{ hsm, db, atms, commandQueue, dual, requests, log, clock, config };
-    AdminConsole console{ access, staffAuth, approvals, tokens, dual, commands, atms, log };
+    DisputeService disputes{ dual, requests, txs, reconciliation };
+    AdminConsole console{ access, staffAuth, approvals, tokens, dual, commands, disputes, atms, log, clock };
     BankServer server{ hsm, log, gate, atms, checkpointService, ServerParts{ authorization, reconciliation, staffService, decider, commands } };
 
     BankNode(const IClock& clockRef, const ServerKeys& keys, const std::filesystem::path& dataDir)
@@ -136,5 +138,6 @@ struct BankNode
     {
         (void)reconciliation.tick();
         (void)commands.tick();
+        (void)disputes.tick();
     }
 };

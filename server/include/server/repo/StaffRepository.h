@@ -37,8 +37,6 @@ public:
     void insert(const StaffRecord& staff);
     std::optional<StaffRecord> find(const std::string& staffId) const;
 
-    // One statement: a failure that arrives after an expired lock starts the count from 1.
-    // The lock is set when the count reaches maxFailures and is not extended by later attempts.
     LoginFailure recordFailure(const std::string& staffId, std::int64_t now, std::uint32_t maxFailures, std::int64_t lockoutSeconds);
     void resetFailures(const std::string& staffId);
 

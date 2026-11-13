@@ -33,8 +33,6 @@ enum class EnqueueResult
 
 const char* enqueueResultToString(EnqueueResult result);
 
-// After a dual control request is approved: sign the command and queue it for the ATM. The ATM polls,
-// executes and reports; only then does the request become Executed.
 class CommandService final : public ICommandService, public IIntentResolver
 {
 private:
@@ -63,13 +61,11 @@ public:
         const IClock& clock,
         const SystemConfig& config);
 
-    // Idempotent: a request that already has a command is not queued twice.
     [[nodiscard]] EnqueueResult enqueueApproved(const std::string& requestId);
 
     [[nodiscard]] std::vector<SignedCommand> pollCommands(const std::string& atmId) override;
     [[nodiscard]] bool reportCommandResult(const std::string& atmId, std::uint64_t commandSeq, bool ok) override;
 
-    // Expires commands nobody fetched in time and queues approvals that a crash left without a command.
     std::size_t tick();
 
     bool owns(const LogEntry& intent) const override;

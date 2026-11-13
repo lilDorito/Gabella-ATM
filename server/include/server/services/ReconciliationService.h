@@ -4,6 +4,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "access/IAccessDecider.h"
 #include "audit/IAuditSink.h"
@@ -16,6 +17,18 @@
 #include "server/repo/CassetteRepository.h"
 #include "server/repo/TxRepository.h"
 #include "server/services/ServerServices.h"
+
+enum class ManualResult
+{
+    Resolved,
+    AlreadyResolved,
+    UnknownTransaction,
+    NotDisputed,
+    TooEarly,
+    Failed
+};
+
+const char* manualResultToString(ManualResult result);
 
 class ReconciliationService final : public IReconciliationService, public IIntentResolver
 {
@@ -31,7 +44,7 @@ private:
 
     bool refuse(const std::string& atmId, const char* call, const std::string& reason);
     bool contradiction(const TxRecord& tx, const std::string& reason);
-    bool settle(const TxRecord& tx, TxStatus to, const std::string& reason, const std::map<int, int>* newExpected);
+    bool settle(const TxRecord& tx, TxStatus to, const std::string& reason, const std::map<int, int>* newExpected, const std::string& by = "reconciliation");
     bool markUncertain(const TxRecord& tx, const std::string& reason);
     bool reconnect(const StatusReport& report);
     bool staffReport(const StatusReport& report, Action action);
@@ -53,6 +66,8 @@ public:
 
     std::size_t tick();
     bool hasUnresolved(const std::string& atmId) const;
+    std::vector<TxRecord> disputed() const;
+    [[nodiscard]] ManualResult resolveManually(std::int64_t txId, bool commit, const std::string& by, const std::string& reason);
 
     bool owns(const LogEntry& intent) const override;
     std::optional<LogEvent> resolve(const LogEntry& intent) override;

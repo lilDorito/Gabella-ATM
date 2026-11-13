@@ -1,8 +1,5 @@
 #pragma once
-// Fixture for the staff / access / command tests: an in-memory SQLite database with the real schema,
-// the real repositories and services, a real BankHsm (libsodium keys) and a controllable log.
-// It has the same shape as ServerRig.h; if ServerRig already builds Database, Clock, log and BankHsm,
-// move the members below "services" into it and drop the duplicates.
+
 #include <sodium.h>
 
 #include <array>
@@ -26,12 +23,17 @@
 #include "server/AdminConsole.h"
 #include "server/SystemConfig.h"
 #include "server/db/Database.h"
+#include "server/repo/AccountRepository.h"
 #include "server/repo/AtmRepository.h"
+#include "server/repo/CassetteRepository.h"
 #include "server/repo/CommandRepository.h"
 #include "server/repo/DualControlRepository.h"
 #include "server/repo/StaffRepository.h"
+#include "server/repo/TxRepository.h"
 #include "server/services/AccessDecider.h"
 #include "server/services/CommandService.h"
+#include "server/services/DisputeService.h"
+#include "server/services/ReconciliationService.h"
 #include "server/services/StaffAuthenticator.h"
 #include "server/services/StaffService.h"
 
@@ -43,8 +45,6 @@ inline const std::string kAtmB = "ATM-002";
 inline const std::string kPassword = "S3cretPass";
 inline const std::int64_t kStart = 1792000000;
 
-// The log the tests look into. It can be switched off, and it refuses what DataPolicy refuses:
-// a run of 13 or more digits in details or in the actor id.
 class TestLog final : public IAuditSink
 {
 private:
@@ -84,7 +84,6 @@ public:
         return false;
     }
 
-    // Index of the first / last event with this opId and outcome, or -1.
     int indexOf(const std::string& opId, Outcome outcome) const
     {
         for (std::size_t i = 0; i < events.size(); ++i)
@@ -92,7 +91,6 @@ public:
         return -1;
     }
 
-    // Every opId that has an Info intent must have a closing event after it.
     bool everyIntentIsClosed() const
     {
         for (std::size_t i = 0; i < events.size(); ++i)
@@ -113,7 +111,6 @@ public:
     }
 };
 
-// Test-only stand-in for argon2id: the "hash" is the password behind a marker.
 inline std::string fakeHash(const std::string& password) { return "$argon2id$fake$" + password; }
 
 inline PasswordCheckFn fakeCheck()
@@ -149,6 +146,9 @@ struct StaffRig
     StaffRepository staff{ db };
     DualControlRepository requests{ db };
     CommandRepository commandQueue{ db };
+    AccountRepository accounts{ db };
+    TxRepository txs{ db };
+    CassetteRepository cassettes{ db };
 
     PermissionTable permissions = PermissionTable::makeDefault();
     ApprovalPolicy policy = ApprovalPolicy::makeDefault();
@@ -163,7 +163,9 @@ struct StaffRig
     StaffService staffService{ *hsm, staffAuth, log };
     AccessDecider decider{ access, policy, atms, log };
     CommandService commands{ *hsm, db, atms, commandQueue, dual, requests, log, clock, config };
-    AdminConsole console{ access, staffAuth, approvals, tokens, dual, commands, atms, log };
+    ReconciliationService reconciliation{ db, txs, accounts, cassettes, decider, log, clock, config };
+    DisputeService disputes{ dual, requests, txs, reconciliation };
+    AdminConsole console{ access, staffAuth, approvals, tokens, dual, commands, disputes, atms, log, clock };
 
     StaffRig()
     {
@@ -216,7 +218,6 @@ struct StaffRig
         return r ? r->token : std::string();
     }
 
-    // Opens a request from the console and approves it with the first `approvers` admins.
     std::string approvedRequest(Action action, const std::string& atmId, const std::string& extra, int approvers = 2)
     {
         const std::string first = consoleToken("A-01");
@@ -226,7 +227,6 @@ struct StaffRig
         return d.requestId;
     }
 
-    // Verifies the signature the way an ATM does: with the bank's public key and the Command domain tag.
     bool commandSignatureValid(const SignedCommand& c) const
     {
         const auto pk = hsm->signPublicKey();

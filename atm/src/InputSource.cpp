@@ -6,6 +6,7 @@
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/select.h>
+#include <termios.h>
 #include <unistd.h>
 #endif
 
@@ -32,4 +33,21 @@ bool InputSource::nextInto(std::string& out)
 #endif
 
     return static_cast<bool>(std::getline(std::cin, out));
+}
+
+bool InputSource::nextHiddenInto(std::string& out)
+{
+#if defined(__unix__) || defined(__APPLE__)
+    termios saved{};
+    if (_scripted || isatty(STDIN_FILENO) == 0 || tcgetattr(STDIN_FILENO, &saved) != 0) return nextInto(out);
+    termios quiet = saved;
+    quiet.c_lflag &= static_cast<tcflag_t>(~ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &quiet);
+    const bool ok = nextInto(out);
+    tcsetattr(STDIN_FILENO, TCSANOW, &saved);
+    std::cout << "\n";
+    return ok;
+#else
+    return nextInto(out);
+#endif
 }

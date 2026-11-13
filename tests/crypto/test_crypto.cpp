@@ -23,8 +23,6 @@
 #include <optional>
 #include <string>
 
-// ---------------------------------------------------------------- test infra
-
 static int g_passed = 0;
 static int g_failed = 0;
 
@@ -51,8 +49,6 @@ static std::string toHex(const std::string& s)
     return r;
 }
 
-// ---------------------------------------------------------------- key pairs
-
 struct SignKeyPair
 {
     std::array<unsigned char, 32> pub;
@@ -78,8 +74,6 @@ static BoxKeyPair generateBoxKeyPair()
     crypto_box_keypair(kp.pub.data(), kp.secret.data());
     return kp;
 }
-
-// ---------------------------------------------------------------- Card
 
 static void testCard()
 {
@@ -108,8 +102,6 @@ static void testCard()
     check(!tooShort.isValidLuhn(), "isValidLuhn: 12-digit PAN -> false");
 }
 
-// ---------------------------------------------------------------- buildPinBlock
-
 static void testPinBlock()
 {
     section("buildPinBlock (ISO 9564 Format 0)");
@@ -132,16 +124,13 @@ static void testPinBlock()
     check(!buildPinBlock("", "5432101234567890", dummy), "false for empty PIN");
 }
 
-// ---------------------------------------------------------------- CryptoCore
-
 static void testCryptoCore()
 {
     section("CryptoCore primitives");
 
     std::string key = "0123456789ABCDEF";
 
-    // AES
-    std::string data = "0123456789ABCDEF"; // 16 bytes
+    std::string data = "0123456789ABCDEF";
     auto ct = CryptoCore::aesCbcEncrypt(key, data);
     check(ct.has_value(), "aesCbcEncrypt returns value");
     if (ct)
@@ -168,7 +157,6 @@ static void testCryptoCore()
     check(decoded && decoded->size() == 3 && (*decoded)[0] == "a:b" && (*decoded)[1].empty() && (*decoded)[2] == "12345", "canonicalDecode reverses canonicalEncode");
     check(!canonicalDecode("PWD:", "PWD:9:short").has_value() && !canonicalDecode("PWD:", "XYZ:1:a").has_value(), "canonicalDecode rejects truncated or mistagged input");
 
-    // HMAC
     auto mac = CryptoCore::hmacSha256(key, "hello");
     check(mac.has_value() && mac->size() == 32, "HMAC-SHA256 yields 32 bytes");
     if (mac)
@@ -177,37 +165,30 @@ static void testCryptoCore()
         check(!CryptoCore::hmacVerify(key, "world", *mac), "HMAC verify fails on altered data");
     }
 
-    // SHA-256 test vector (RFC): SHA256("abc")
     std::string h = CryptoCore::sha256("abc");
     check(h.size() == 32, "SHA-256 yields 32 bytes");
     check(toHex(h) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256 matches test vector");
 
-    // Canonical encoding
     auto c1 = canonicalEncode("REQ:", { "AB", "C" });
     auto c2 = canonicalEncode("REQ:", { "A", "BC" });
     check(c1 != c2, "canonical encoding prevents field-boundary collisions");
     check(c1 == "REQ:2:AB1:C", "canonical encoding format");
 
-    // Constant-time compare
     check(CryptoCore::constantTimeEqual("abc", "abc"), "equal strings");
     check(!CryptoCore::constantTimeEqual("abc", "abd"), "unequal strings");
     check(!CryptoCore::constantTimeEqual("abc", "abcd"), "different lengths");
     check(CryptoCore::constantTimeEqual("", ""), "empty strings");
 
-    // Cleanse
     std::string secret = "to be erased";
     CryptoCore::cleanse(secret);
     check(secret.empty(), "cleanse clears the string");
 
-    // Random
     auto r1 = CryptoCore::randomBytes(16);
     auto r2 = CryptoCore::randomBytes(16);
     check(r1.has_value() && r1->size() == 16, "randomBytes(16) yields 16 bytes");
     check(r1 != r2, "randomBytes produces different output");
     check(CryptoCore::randomBytes(0).has_value(), "randomBytes(0) ok");
 }
-
-// ---------------------------------------------------------------- AtmHsm lifecycle
 
 static void testAtmHsmLifecycle()
 {
@@ -225,21 +206,16 @@ static void testAtmHsmLifecycle()
 
     std::string dummy(8, '\0');
 
-    // Uninitialized
     check(!hsm.isDestroyed(), "not destroyed initially");
     check(!hsm.encryptPinBlock(dummy, "ctx").has_value(), "operations refuse before masterKey installed");
 
-    // Wrong-size master key
     check(!hsm.installMasterKey("short"), "rejects short masterKey");
 
-    // Install master key
     check(hsm.installMasterKey(masterKey), "installMasterKey succeeds");
     check(!hsm.installMasterKey(masterKey), "second installMasterKey fails");
 
-    // Still not operational
     check(!hsm.encryptPinBlock(dummy, "ctx").has_value(), "operations refuse until all working keys present");
 
-    // Load working keys one by one
     auto encBlob = wrapWorkingKey(masterKey, KeyType::Encryption, encKey);
     auto macBlob = wrapWorkingKey(masterKey, KeyType::Mac, macKey);
     auto auditBlob = wrapWorkingKey(masterKey, KeyType::Audit, auditKey);
@@ -254,7 +230,6 @@ static void testAtmHsmLifecycle()
     check(hsm.updateWorkingKey(KeyType::Audit, *auditBlob), "install auditKey");
     check(hsm.encryptPinBlock(dummy, "ctx").has_value(), "operational after all 3 working keys");
 
-    // Wrong-size blob
     check(!hsm.updateWorkingKey(KeyType::Encryption, "short"), "rejects wrong-size key blob");
 
     const auto macBefore = hsm.macMessage("probe");
@@ -271,7 +246,6 @@ static void testAtmHsmLifecycle()
     check(!hsm.updateWorkingKey(KeyType::Mac, *wrongMaster), "rejects key blob wrapped under another masterKey");
 }
 
-// ---------------------------------------------------------------- MAC
 
 static void testMac(AtmHsm& atm, BankHsm& bank)
 {
@@ -295,11 +269,9 @@ static void testMac(AtmHsm& atm, BankHsm& bank)
         check(!bank.verifyAudit("ATM-001", "other content", *audit), "audit MAC bound to content");
     }
 
-    // Cross-check: message MAC must not verify as audit MAC
     check(!bank.verifyAudit("ATM-001", data, *mac), "message MAC does not work as audit MAC (key separation)");
 }
 
-// ---------------------------------------------------------------- Ed25519 sign/verify
 
 static void testSignAndVerify(AtmHsm& atm, BankHsm& bank)
 {
@@ -324,7 +296,6 @@ static void testSignAndVerify(AtmHsm& atm, BankHsm& bank)
     check(cmdSig && atm.verifyServer(SignDomain::Command, "RESTORE", *cmdSig), "COMMAND signature verifies");
 }
 
-// ---------------------------------------------------------------- sealed box
 
 static void testSealedBox(AtmHsm& atm, BankHsm& bank)
 {
@@ -341,7 +312,6 @@ static void testSealedBox(AtmHsm& atm, BankHsm& bank)
     check(sealed->size() > password.size() + binding.size() + crypto_box_SEALBYTES, "sealed box carries the binding next to the password");
     check(*sealed != password, "sealed box is not plaintext");
 
-    // Correct sealed box -> password recovered in caller's buffer.
     std::string opened;
     check(bank.openPassword(*sealed, binding, opened), "openPassword succeeds");
     check(opened == password, "opened password matches original");
@@ -352,34 +322,24 @@ static void testSealedBox(AtmHsm& atm, BankHsm& bank)
     check(!bank.openPassword(*sealed, otherBinding, moved), "A18: old sealed password in a new login request is rejected");
     check(moved.empty(), "A18: nothing is revealed on a binding mismatch");
 
-    // Tampered sealed box: openPassword fails and wipes the output buffer.
     std::string shouldBeEmpty = "sentinel";
     std::string bad = *sealed;
     bad[5] ^= 0x01;
     check(!bank.openPassword(bad, binding, shouldBeEmpty), "tampered sealed box rejected");
     check(shouldBeEmpty.empty(), "output wiped on failure");
 
-    // Pre-filled non-empty output must be wiped even on failure, with no
-    // residue of the old contents. This is the SSO-safe guarantee.
     std::string preFilled = "AAAAAAAAAAAAAAAA";
     std::string bad2 = *sealed;
     bad2[7] ^= 0x01;
     check(!bank.openPassword(bad2, binding, preFilled), "tampered sealed box rejected (2)");
     check(preFilled.empty(), "pre-filled out wiped on failure");
 
-    // Too short to be a sealed box.
     std::string tooShort = "abc";
     std::string alsoEmpty = "sentinel";
     check(!bank.openPassword(tooShort, binding, alsoEmpty), "too-short sealed box rejected");
     check(alsoEmpty.empty(), "output wiped on too-short input");
-
-    // Empty plaintext is not a valid staff password.
-    // (sealPassword succeeds, but openPassword refuses 0-length output.)
-    // We do not test this via sealPassword to avoid relying on libsodium's
-    // behaviour for empty inputs; the CryptoCore unit test covers the case.
 }
 
-// ---------------------------------------------------------------- PinModule
 
 static void testPinModule(AtmHsm& atm, BankHsm& bank)
 {
@@ -393,7 +353,6 @@ static void testPinModule(AtmHsm& atm, BankHsm& bank)
     check(pinVerifyValue.has_value(), "computePinVerifyValue returns a value");
     if (!pinVerifyValue) return;
 
-    // Happy path
     auto req = pm.processPin(card, "1234", Action::Withdraw, 50000, "S-0001", "ATM-001", 1700000000);
     check(req.has_value(), "processPin returns a request");
     if (!req) return;
@@ -408,10 +367,8 @@ static void testPinModule(AtmHsm& atm, BankHsm& bank)
     check(req->getAmount() == 50000, "amount preserved");
     check(req->getMac().size() == 32, "mac is 32 bytes");
 
-    // Server-side MAC verification
     check(bank.verifyMessage("ATM-001", req->macPayload(), req->getMac()), "server verifies request MAC");
 
-    // Altered action -> MAC breaks
     std::string wrongCanonical = canonicalEncode("REQ:",
         {
             req->getAtmId(),
@@ -425,7 +382,6 @@ static void testPinModule(AtmHsm& atm, BankHsm& bank)
         });
     check(!bank.verifyMessage("ATM-001", wrongCanonical, req->getMac()), "altered action breaks MAC");
 
-    // Server-side PIN verification
     check(bank.verifyPin("ATM-001", req->getCiphertext(), req->getPan(), *pinVerifyValue, req->pinBinding()), "server verifies PIN");
 
     const std::string freshNonce = "fresh-nonce-0001";
@@ -436,7 +392,6 @@ static void testPinModule(AtmHsm& atm, BankHsm& bank)
     check(bank.verifyMessage("ATM-001", forged.macPayload(), forged.getMac()), "A17 setup: a compromised program gets a valid MAC for the new request");
     check(!bank.verifyPin("ATM-001", forged.getCiphertext(), forged.getPan(), *pinVerifyValue, forged.pinBinding()), "A17: old PIN ciphertext moved into a new request is rejected");
 
-    // Failure paths
     check(!pm.processPin(card, "12ab", Action::Withdraw, 50000, "S", "A", 0), "non-digit PIN rejected");
     check(!pm.processPin(card, "12", Action::Withdraw, 50000, "S", "A", 0), "short PIN rejected");
     check(!pm.processPin(card, "1234", Action::Withdraw, -1, "S", "A", 0), "negative amount rejected");
@@ -445,7 +400,6 @@ static void testPinModule(AtmHsm& atm, BankHsm& bank)
     check(!pm.processPin(bad, "1234", Action::Withdraw, 50000, "S", "A", 0), "non-digit PAN rejected");
 }
 
-// ---------------------------------------------------------------- verifyPin
 
 static void testVerifyPin(AtmHsm& atm, BankHsm& bank)
 {
@@ -476,7 +430,6 @@ static void testVerifyPin(AtmHsm& atm, BankHsm& bank)
     const std::string otherAmount = AuthRequest::pinBinding("ATM-001", "S-1", Action::Withdraw, "nonce-1", 1700000000, pan, 900000);
     check(!bank.verifyPin("ATM-001", *ciphertext, pan, *pinVerifyValue, otherAmount), "PIN bound to one amount does not verify for another");
 
-    // Wrong PIN
     std::string wrongBlock;
     buildPinBlock("9999", pan, wrongBlock);
     auto wrongCt = atm.encryptPinBlock(wrongBlock, binding);
@@ -485,26 +438,21 @@ static void testVerifyPin(AtmHsm& atm, BankHsm& bank)
         check(!bank.verifyPin("ATM-001", *wrongCt, pan, *pinVerifyValue, binding), "wrong PIN rejected");
     }
 
-    // Wrong PAN
     check(!bank.verifyPin("ATM-001", *ciphertext, "1111111111111111", *pinVerifyValue, binding), "wrong PAN rejected");
 
-    // Tampered ciphertext
     std::string bad = *ciphertext;
     bad[20] ^= 0x01;
     check(!bank.verifyPin("ATM-001", bad, pan, *pinVerifyValue, binding), "tampered ciphertext rejected");
 }
 
-// ---------------------------------------------------------------- working keys
 
 static void testWorkingKeyRotation(BankHsm& bank)
 {
     section("BankHsm working key rotation");
 
-    // No pending key yet
     check(!bank.commitWorkingKey("ATM-001", KeyType::Encryption), "commit fails without pending key");
     check(!bank.cancelPendingWorkingKey("ATM-001", KeyType::Encryption), "cancel fails without pending key");
 
-    // Prepare -> second prepare rejected -> commit works
     auto blob = bank.prepareWorkingKey("ATM-001", KeyType::Encryption);
     check(blob.has_value(), "prepareWorkingKey returns a blob");
     if (!blob) return;
@@ -515,7 +463,6 @@ static void testWorkingKeyRotation(BankHsm& bank)
     check(bank.prepareWorkingKey("ATM-001", KeyType::Encryption).has_value(), "prepare allowed again after commit");
     check(bank.cancelPendingWorkingKey("ATM-001", KeyType::Encryption), "cleanup: cancel pending Encryption key");
 
-    // Prepare -> cancel -> prepare again allowed
     check(bank.prepareWorkingKey("ATM-001", KeyType::Mac).has_value(), "prepare Mac key");
     check(!bank.prepareWorkingKey("ATM-001", KeyType::Mac).has_value(), "second prepare Mac rejected");
     check(bank.cancelPendingWorkingKey("ATM-001", KeyType::Mac), "cancel pending Mac key");
@@ -523,13 +470,11 @@ static void testWorkingKeyRotation(BankHsm& bank)
     check(bank.prepareWorkingKey("ATM-001", KeyType::Mac).has_value(), "prepare Mac allowed again after cancel");
     check(bank.commitWorkingKey("ATM-001", KeyType::Mac), "cleanup: commit Mac key");
 
-    // Cancel must not affect other types.
     check(bank.prepareWorkingKey("ATM-001", KeyType::Audit).has_value(), "prepare Audit key");
     check(!bank.cancelPendingWorkingKey("ATM-001", KeyType::Encryption), "cancel Encryption while Audit pending does nothing");
     check(bank.cancelPendingWorkingKey("ATM-001", KeyType::Audit), "cleanup: cancel Audit key");
 }
 
-// ---------------------------------------------------------------- tamper
 
 static void testTamper()
 {
@@ -568,7 +513,6 @@ static void testTamper()
     check(!hsm.generateNonce().has_value(), "generateNonce fails after tamper");
     check(!hsm.sealPassword("pwd", "ctx").has_value(), "sealPassword fails after tamper");
 
-    // verifyServer MUST still work — needed to receive RestoreFromOutOfService
     auto sig = bank.sign(SignDomain::Command, "RESTORE");
     check(sig.has_value(), "bank signs recovery command");
     if (sig)
@@ -576,7 +520,6 @@ static void testTamper()
         check(hsm.verifyServer(SignDomain::Command, "RESTORE", *sig), "Destroyed HSM still verifies recovery command");
     }
 
-    // Idempotent
     hsm.reportTamper();
     check(hsm.isDestroyed(), "reportTamper is idempotent");
 
@@ -591,7 +534,6 @@ static void testTamper()
     check(!hsm.installMasterKey(masterKey), "an operational HSM still refuses a second master key");
 }
 
-// ---------------------------------------------------------------- per-ATM keys
 
 static bool bringUp(AtmHsm& atm, const AtmKeySet& k)
 {
@@ -675,7 +617,6 @@ static void testPerAtmKeys()
     check(bank.verifyMessage("ATM-A", data, *atmA.macMessage(data)), "ATM-A's new MAC verifies");
 }
 
-// ---------------------------------------------------------------- password hashing
 
 static void testPasswordHash()
 {
@@ -696,38 +637,31 @@ static void testPasswordHash()
     check(!CryptoCore::verifyPassword(std::string(500, 'x'), "S3cretPass"), "an oversized hash verifies nothing");
 }
 
-// ---------------------------------------------------------------- main
 
 int main()
 {
     gabella_test::banner("Crypto test suite");
 
-    // libsodium init — must succeed before any Ed25519 / sealed box call.
     if (!CryptoCore::init())
     {
         std::cerr << "fatal: libsodium initialization failed\n";
         return 1;
     }
 
-    // Shared keys
     const std::string masterKey = "0123456789ABCDEF";
     const std::string encKey = "FEDCBA9876543210";
     const std::string macKey = "1111222233334444";
     const std::string auditKey = "AAAABBBBCCCCDDDD";
     const std::string pinKey = "PINPINPINPINPIN1";
 
-    // Bank keypairs
     SignKeyPair bankSign = generateSignKeyPair();
     BoxKeyPair bankBox = generateBoxKeyPair();
 
-    // BankHsm (trusted side)
     BankHsm bank("SERVERSERVERSRV1", pinKey, bankSign.pub, bankSign.secret, bankBox.pub, bankBox.secret);
     check(bank.provisionAtm("ATM-001", AtmKeySet{ masterKey, encKey, macKey, auditKey }), "setup: provisionAtm");
 
-    // AtmHsm (untrusted side) — knows only the bank's public keys
     AtmHsm atm(bankSign.pub, bankBox.pub);
 
-    // Bring the AtmHsm up to Operational
     check(atm.installMasterKey(masterKey), "setup: installMasterKey");
     auto encBlob = wrapWorkingKey(masterKey, KeyType::Encryption, encKey);
     auto macBlob = wrapWorkingKey(masterKey, KeyType::Mac, macKey);
@@ -736,7 +670,6 @@ int main()
     check(atm.updateWorkingKey(KeyType::Mac, *macBlob), "setup: install macKey");
     check(atm.updateWorkingKey(KeyType::Audit, *auditBlob), "setup: install auditKey");
 
-    // Run the tests
     testCard();
     testPinBlock();
     testCryptoCore();
@@ -749,7 +682,7 @@ int main()
     testPerAtmKeys();
     testPasswordHash();
     testTamper();
-    testWorkingKeyRotation(bank);   // mutates `bank`, keep last
+    testWorkingKeyRotation(bank);
 
     std::cout << "\n===================\n";
     std::cout << "PASSED: " << g_passed << "\n";

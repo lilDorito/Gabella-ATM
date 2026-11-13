@@ -1,4 +1,6 @@
 #include <array>
+#include <cctype>
+#include <map>
 #include <exception>
 #include <filesystem>
 #include <iostream>
@@ -9,11 +11,15 @@
 #include "AtmNode.h"
 #include "BankNode.h"
 #include "DemoData.h"
+#include "atm/Terminal.h"
 #include "common/Clock.h"
 #include "crypto/CryptoCore.h"
 
 namespace
 {
+using term::Panel;
+using term::Tone;
+
 constexpr int kOk = 0;
 constexpr int kFatal = 1;
 constexpr int kUsage = 2;
@@ -23,11 +29,13 @@ const std::string kDemoAtm = "ATM-001";
 const std::string kDemoRoot = "GABELLA-DEMO-KEY-ROOT";
 const std::string kServerKey = "SERVERSERVERSRV1";
 
+bool gColor = false;
+
 void usage()
 {
     std::cerr << "usage: gabella_bank [--data <dir>] [demo | atm | admin]\n"
                  "  demo    run a withdrawal, a balance check and a log audit end to end (default)\n"
-                 "  atm     drive ATM-001 by hand: card <pan> <mm> <yyyy>, service, commands, tamper, status, quit\n"
+                 "  atm     drive ATM-001 by hand\n"
                  "  admin   open the administrator console\n"
                  "  --data  folder for the database, logs and ATM state (default: gabella-data)\n";
 }
@@ -58,7 +66,20 @@ std::string demoKey(const std::string& atmId, const char* purpose)
 
 AtmKeySet demoAtmKeys(const std::string& atmId) { return AtmKeySet{ demoKey(atmId, "master"), demoKey(atmId, "enc"), demoKey(atmId, "mac"), demoKey(atmId, "audit") }; }
 
-std::string uah(std::int64_t kop) { return std::to_string(kop / 100) + " UAH"; }
+std::string uah(std::int64_t kop) { return term::groupThousands(std::to_string(kop / 100)) + " UAH"; }
+
+std::string masked(const std::string& pan) { return pan.size() > 4 ? "•••• " + pan.substr(pan.size() - 4) : pan; }
+
+std::string expiry(const DemoCard& card) { return std::string(card.expMonth < 10 ? "0" : "") + std::to_string(card.expMonth) + "/" + std::to_string(card.expYear); }
+
+std::string cassettes(const std::map<int, int>& counts)
+{
+    std::string out;
+    for (const auto& [denomination, count] : counts) out += (out.empty() ? "" : "  ") + std::to_string(denomination) + "×" + std::to_string(count);
+    return out.empty() ? "empty" : out;
+}
+
+void fail(const std::string& message) { std::cerr << "  " << term::paint("✗", Tone::Bad, gColor) << " " << message << "\n"; }
 
 bool startBank(BankNode& bank)
 {
@@ -67,7 +88,7 @@ bool startBank(BankNode& bank)
     {
         if (!bank.hsm.provisionAtm(atmId, demoAtmKeys(atmId)))
         {
-            std::cerr << "fatal: bank HSM could not provision " << atmId << "\n";
+            fail("bank HSM could not provision " + atmId);
             return false;
         }
     }
@@ -75,24 +96,35 @@ bool startBank(BankNode& bank)
     const LoggerState state = bank.log.init();
     if (state != LoggerState::Ready)
     {
-        std::cerr << "fatal: server log is " << loggerStateToString(state) << ", refusing to start\n";
+        fail(std::string("server log is ") + loggerStateToString(state) + ", refusing to start");
         return false;
     }
 
     const RecoveryReport recovered = bank.recover();
-    std::cout << "server: recovery open=" << recovered.open << " resolved=" << recovered.resolved << " unowned=" << recovered.unowned << " failed=" << recovered.failed << "\n";
     bank.tick();
+    std::string recovery = "nothing to finish";
+    if (recovered.open > 0) recovery = std::to_string(recovered.resolved) + " unfinished operation(s) closed";
+    if (recovered.failed > 0 || recovered.unowned > 0) recovery += ", " + std::to_string(recovered.failed + recovered.unowned) + " left for review";
+    term::line(std::cout, "✓", "Bank online · recovery: " + recovery, recovered.failed > 0 ? Tone::Warn : Tone::Good, gColor);
     return true;
 }
 
 std::int64_t availableKop(BankNode& bank, const std::string& accountId) { return bank.accounts.balance(accountId).value_or(0) - bank.txs.reservedTotal(accountId); }
+
+void step(int number, const std::string& title, const std::string& narration)
+{
+    std::cout << "\n  " << term::paint("━━ " + std::to_string(number) + " · " + title, Tone::Accent, gColor) << "\n";
+    term::line(std::cout, " ", narration, Tone::Dim, gColor);
+}
+
+std::string verdict(bool ok, const std::string& text) { return std::string(ok ? "✓ " : "✗ ") + text; }
 
 int runDemo(BankNode& bank, AtmNode& atm)
 {
     const DemoCard& card = demoCards().front();
     const std::int64_t before = availableKop(bank, card.accountId);
 
-    std::cout << "\n--- withdrawal of 500 UAH ---\n";
+    step(1, "Withdraw 500 UAH", "card " + masked(card.pan) + " · option 2 · amount 500 · PIN ••••");
     atm.reader.insertCard(card.pan, card.expMonth, card.expYear);
     for (const char* line : { "2", "500" }) atm.input.push(line);
     atm.input.push(card.pin);
@@ -101,13 +133,13 @@ int runDemo(BankNode& bank, AtmNode& atm)
     const auto record = bank.atms.find(kDemoAtm);
     const auto tx = record ? bank.txs.findBySeq(kDemoAtm, record->lastDispenseSeq) : std::nullopt;
 
-    std::cout << "\n--- balance check ---\n";
+    step(2, "Check the balance", "card " + masked(card.pan) + " · option 1 · PIN ••••");
     atm.reader.insertCard(card.pan, card.expMonth, card.expYear);
     atm.input.push("1");
     atm.input.push(card.pin);
     atm.controller.runSession();
 
-    std::cout << "\n--- auditor verifies the log ---\n";
+    step(3, "Auditor verifies the ATM log", "service menu · staff AU-01 · option 1 (verify) · option 0 (exit)");
     for (const char* line : { "AU-01", kDemoStaffPassword, "1", "0" }) atm.input.push(line);
     atm.controller.runServiceMenu();
 
@@ -117,42 +149,94 @@ int runDemo(BankNode& bank, AtmNode& atm)
     const VerifyResult serverChain = LogVerifier(bank.logStorage, bank.logSigner).verifyChain();
     const auto checkpoint = bank.checkpoints.latest(kDemoAtm);
 
-    std::cout << "\n--- result ---\n";
-    std::cout << "withdrawal: status=" << (tx ? txStatusToString(tx->status) : "missing") << " balance_before=" << uah(before) << " balance_after=" << uah(after) << "\n";
-    std::cout << "atm_log: entries=" << atmChain.entryCount << " chain=" << (atmChain.ok ? "ok" : verifyErrorToString(atmChain.reason)) << " pending_reports=" << atm.queue.size() << "\n";
-    std::cout << "server_log: entries=" << serverChain.entryCount << " chain=" << (serverChain.ok ? "ok" : verifyErrorToString(serverChain.reason))
-              << " atm_checkpoint_seq=" << (checkpoint ? checkpoint->seqNo : 0) << "\n";
+    const bool committed = tx && tx->status == TxStatus::Committed;
+    const bool paidOnce = after == before - 50000;
+    const bool ok = committed && paidOnce && atmChain.ok && serverChain.ok && atm.queue.empty() && checkpoint;
 
-    const bool ok = tx && tx->status == TxStatus::Committed && after == before - 50000 && atmChain.ok && serverChain.ok && atm.queue.empty() && checkpoint;
-    std::cout << (ok ? "demo: ok\n" : "demo: FAILED\n");
+    Panel result("DEMO RESULT", ok ? Tone::Good : Tone::Bad);
+    result.pair("Withdrawal", verdict(committed, tx ? txStatusToString(tx->status) : "missing"), committed ? Tone::Good : Tone::Bad);
+    result.pair("Balance", verdict(paidOnce, uah(before) + " → " + uah(after)), paidOnce ? Tone::Good : Tone::Bad);
+    result.pair("ATM log", verdict(atmChain.ok, std::to_string(atmChain.entryCount) + " entries, " + (atmChain.ok ? "chain intact" : verifyErrorToString(atmChain.reason))),
+        atmChain.ok ? Tone::Good : Tone::Bad);
+    result.pair("Server log", verdict(serverChain.ok, std::to_string(serverChain.entryCount) + " entries, " + (serverChain.ok ? "chain intact" : verifyErrorToString(serverChain.reason))),
+        serverChain.ok ? Tone::Good : Tone::Bad);
+    result.pair("Checkpoint", verdict(checkpoint.has_value(), checkpoint ? "entry #" + std::to_string(checkpoint->seqNo) + " stored by the bank" : "none stored"), checkpoint ? Tone::Good : Tone::Bad);
+    result.pair("Reports queued", verdict(atm.queue.empty(), atm.queue.empty() ? "none" : std::to_string(atm.queue.size()) + " waiting"), atm.queue.empty() ? Tone::Good : Tone::Bad);
+    result.blank().big(ok ? "All checks passed" : "Demo failed", ok ? Tone::Good : Tone::Bad);
+    result.render(std::cout, gColor);
+    std::cout << "\n";
     return ok ? kOk : kDemoFailed;
 }
 
-void atmHelp()
+void showWelcome()
 {
-    std::cout << "commands:\n"
-                 "  card <pan> <mm> <yyyy>   insert a card and start a session\n"
-                 "  service                  open the service menu\n"
-                 "  commands                 fetch and run signed commands from the bank\n"
-                 "  tamper                   open the case\n"
-                 "  status                   show the ATM's state\n"
-                 "  quit\n";
+    Panel("GABELLA BANK · " + kDemoAtm).text("Terminal ready").hint("Type help for commands").render(std::cout, gColor);
+
+    Panel cards("DEMO CARDS");
+    int index = 1;
+    for (const DemoCard& card : demoCards())
+    {
+        cards.option(std::to_string(index++), card.pan + "  " + expiry(card) + "  PIN " + card.pin);
+        cards.hint("     " + std::string(card.note));
+    }
+    cards.blank().hint("Insert one with: card 1, card 2, …");
+    cards.render(std::cout, gColor);
 }
 
-void demoHelp()
+void showHelp()
 {
-    std::cout << "demo cards:\n";
-    for (const DemoCard& card : demoCards())
-        std::cout << "  card " << card.pan << " " << (card.expMonth < 10 ? "0" : "") << card.expMonth << " " << card.expYear << "   PIN " << card.pin << "   " << card.note << "\n";
-    std::cout << "staff: E-01 engineer, C-01 collector, AU-01 auditor, A-01..A-03 admins (console only), password " << kDemoStaffPassword << "\n";
+    Panel("COMMANDS")
+        .pair("card <n>", "insert demo card n")
+        .pair("card <pan> …", "insert any card: card <pan> <mm> <yyyy>")
+        .pair("service", "staff menu (E-01, C-01, AU-01)")
+        .pair("commands", "run signed commands from the bank")
+        .pair("tamper", "open the case")
+        .pair("status", "show the ATM's state")
+        .pair("cards", "list the demo cards")
+        .pair("quit", "leave")
+        .blank()
+        .hint(std::string("Staff password: ") + kDemoStaffPassword + ". Admins sign in on the console only (gabella_bank admin).")
+        .render(std::cout, gColor);
+}
+
+void showStatus(BankNode& bank, AtmNode& atm)
+{
+    const auto record = bank.atms.find(kDemoAtm);
+    const bool active = record && record->status == AtmStatus::Active;
+    Panel panel("STATUS", active ? Tone::Accent : Tone::Bad);
+    panel.pair("Session", sessionStateToString(atm.controller.currentState()));
+    panel.pair("Bank says", record ? atmStatusToString(record->status) : "unknown", active ? Tone::Good : Tone::Bad);
+    panel.pair("Cassettes", cassettes(atm.dispenser.cassetteCounts()));
+    panel.pair("Reports queued", atm.queue.empty() ? "none" : std::to_string(atm.queue.size()), atm.queue.empty() ? Tone::Plain : Tone::Warn);
+    if (record && record->logReviewRequired) panel.pair("Log", "flagged for review", Tone::Warn);
+    panel.render(std::cout, gColor);
+}
+
+bool insertCard(AtmNode& atm, std::istringstream& words)
+{
+    std::string first;
+    if (!(words >> first)) return false;
+    const auto& cards = demoCards();
+    if (first.size() <= 2 && !first.empty() && std::isdigit(static_cast<unsigned char>(first[0])))
+    {
+        const std::size_t index = static_cast<std::size_t>(std::stoi(first));
+        if (index < 1 || index > cards.size()) return false;
+        const DemoCard& card = cards[index - 1];
+        atm.reader.insertCard(card.pan, card.expMonth, card.expYear);
+        return true;
+    }
+    int month = 0;
+    int year = 0;
+    if (!(words >> month >> year)) return false;
+    atm.reader.insertCard(first, month, year);
+    return true;
 }
 
 int runAtm(BankNode& bank, AtmNode& atm)
 {
-    std::cout << "ATM " << kDemoAtm << " ready. Type help.\n";
-    demoHelp();
+    showWelcome();
     std::string line;
-    while (std::cout << "atm> " << std::flush, std::getline(std::cin, line))
+    while (std::cout << "\n", term::prompt(std::cout, "atm", gColor), std::getline(std::cin, line))
     {
         std::istringstream words(line);
         std::string cmd;
@@ -162,20 +246,19 @@ int runAtm(BankNode& bank, AtmNode& atm)
         if (cmd == "quit" || cmd == "exit") break;
         if (cmd == "help")
         {
-            atmHelp();
-            demoHelp();
+            showHelp();
+        }
+        else if (cmd == "cards")
+        {
+            showWelcome();
         }
         else if (cmd == "card")
         {
-            std::string pan;
-            int month = 0;
-            int year = 0;
-            if (!(words >> pan >> month >> year))
+            if (!insertCard(atm, words))
             {
-                std::cout << "usage: card <pan> <mm> <yyyy>\n";
+                term::line(std::cout, "!", "Usage: card <n> or card <pan> <mm> <yyyy>", Tone::Warn, gColor);
                 continue;
             }
-            atm.reader.insertCard(pan, month, year);
             atm.controller.runSession();
         }
         else if (cmd == "service")
@@ -185,23 +268,24 @@ int runAtm(BankNode& bank, AtmNode& atm)
         else if (cmd == "commands")
         {
             atm.controller.processServerCommands();
+            showStatus(bank, atm);
         }
         else if (cmd == "tamper")
         {
             atm.tamper.trigger();
+            term::line(std::cout, "!", "Case opened: keys wiped, dispenser locked, bank notified", Tone::Bad, gColor);
         }
         else if (cmd == "status")
         {
-            const auto record = bank.atms.find(kDemoAtm);
-            std::cout << "atm: state=" << sessionStateToString(atm.controller.currentState()) << " server_status=" << (record ? atmStatusToString(record->status) : "unknown")
-                      << " pending_reports=" << atm.queue.size() << "\n";
+            showStatus(bank, atm);
         }
         else
         {
-            std::cout << "unknown command, type help\n";
+            term::line(std::cout, "!", "Unknown command \"" + cmd + "\". Type help.", Tone::Warn, gColor);
         }
         bank.tick();
     }
+    std::cout << "\n";
     return kOk;
 }
 }
@@ -230,9 +314,10 @@ int main(int argc, char** argv)
 
     try
     {
+        gColor = term::prepareTerminal();
         if (!CryptoCore::init())
         {
-            std::cerr << "fatal: libsodium initialization failed\n";
+            fail("libsodium initialization failed");
             return kFatal;
         }
         std::filesystem::create_directories(dataDir / "logs");
@@ -244,15 +329,16 @@ int main(int argc, char** argv)
 
         if (mode == "admin") return bank.console.run(std::cin, std::cout);
 
-        AtmNode atm(kDemoAtm, clock, bank.server, keys.signPublic, keys.boxPublic, demoAtmKeys(kDemoAtm), bank.cassettes.expected(kDemoAtm), dataDir, bank.config.checkpointInterval, mode == "demo");
+        const term::Style style{ true, gColor, mode == "atm" };
+        AtmNode atm(kDemoAtm, clock, bank.server, keys.signPublic, keys.boxPublic, demoAtmKeys(kDemoAtm), bank.cassettes.expected(kDemoAtm), dataDir, bank.config.checkpointInterval, mode == "demo", style);
         const LoggerState atmLog = atm.log.init();
-        if (atmLog != LoggerState::Ready) std::cout << "atm: log is " << loggerStateToString(atmLog) << ", the ATM will stay out of service\n";
+        if (atmLog != LoggerState::Ready) term::line(std::cout, "!", std::string("ATM log is ") + loggerStateToString(atmLog) + ", the ATM will stay out of service", Tone::Bad, gColor);
 
         return mode == "demo" ? runDemo(bank, atm) : runAtm(bank, atm);
     }
     catch (const std::exception& e)
     {
-        std::cerr << "fatal: " << e.what() << "\n";
+        fail(e.what());
         return kFatal;
     }
 }

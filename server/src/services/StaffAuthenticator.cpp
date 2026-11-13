@@ -43,7 +43,6 @@ std::optional<Role> SqliteStaffAuthenticator::verify(const std::string& staffId,
         const auto staff = _staff.find(staffId);
         const std::int64_t now = _clock.nowUnix();
 
-        // One hash is computed in every case, so the answer time does not tell which ids exist.
         const bool passwordOk = _check(staff ? staff->passwordHash : _dummyHash, password);
 
         if (!staff)
@@ -71,7 +70,6 @@ std::optional<Role> SqliteStaffAuthenticator::verify(const std::string& staffId,
     }
     catch (const std::exception&)
     {
-        // A broken staff table must never read as "password accepted".
         return std::nullopt;
     }
 }
@@ -137,7 +135,6 @@ bool SqliteStaffAuthenticator::owns(const LogEntry& intent) const
 
 std::optional<LogEvent> SqliteStaffAuthenticator::resolve(const LogEntry& intent)
 {
-    // A counter change leaves no record of its own to look up, so the outcome cannot be established.
     LogEvent result = intent.getEvent();
     result.outcome = Outcome::Failure;
     result.details += " recovered=unverified";

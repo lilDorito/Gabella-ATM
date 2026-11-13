@@ -29,8 +29,6 @@ struct CommandRecord
     CommandStatus status = CommandStatus::Queued;
 };
 
-// atm_commands is the per-ATM queue of signed commands. params and signature are binary (a working-key
-// blob, an Ed25519 signature), so they are stored as hex.
 class CommandRepository
 {
 private:
@@ -39,7 +37,6 @@ private:
 public:
     explicit CommandRepository(Database& db) : _db(db) {}
 
-    // Takes the next number from atms.last_command_seq. Call inside a Transaction together with insert().
     [[nodiscard]] std::optional<std::uint64_t> reserveSeq(const std::string& atmId);
     void insert(const CommandRecord& command);
 

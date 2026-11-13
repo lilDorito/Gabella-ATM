@@ -15,7 +15,7 @@ bool allDigits(const std::string& s)
 bool KeypadEmulator::readHiddenPin(std::string& out)
 {
     notifyRead();
-    if (!_enabled || !_input.nextInto(out))
+    if (!_enabled || !_input.nextHiddenInto(out))
     {
         CryptoCore::cleanse(out);
         return false;
@@ -32,7 +32,7 @@ bool KeypadEmulator::readHiddenPin(std::string& out)
 bool KeypadEmulator::readHiddenSecret(std::string& out)
 {
     notifyRead();
-    if (!_enabled || !_input.nextInto(out) || out.empty())
+    if (!_enabled || !_input.nextHiddenInto(out) || out.empty())
     {
         CryptoCore::cleanse(out);
         return false;

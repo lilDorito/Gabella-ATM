@@ -15,5 +15,6 @@ public:
 
     void push(std::string line) { _queue.push_back(std::move(line)); }
     bool nextInto(std::string& out);
+    bool nextHiddenInto(std::string& out);
     std::size_t remaining() const { return _queue.size(); }
 };

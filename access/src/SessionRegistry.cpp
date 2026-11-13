@@ -6,16 +6,26 @@ SessionRegistry::SessionRegistry(const IClock& clock, std::int64_t ttlSeconds) :
 
 void SessionRegistry::open(const std::string& sessionId)
 {
-    if (sessionId.empty()) return;
-    _sessions[sessionId] = _clock.nowUnix() + _ttlSeconds;
+    if (sessionId.empty() || isClosed(sessionId)) return;
+    _sessions[sessionId] = Entry{ _clock.nowUnix() + _ttlSeconds, false };
 }
 
-void SessionRegistry::close(const std::string& sessionId) { _sessions.erase(sessionId); }
+void SessionRegistry::close(const std::string& sessionId)
+{
+    if (sessionId.empty()) return;
+    _sessions[sessionId] = Entry{ _clock.nowUnix() + _ttlSeconds, true };
+}
 
 bool SessionRegistry::isOpen(const std::string& sessionId) const
 {
     const auto it = _sessions.find(sessionId);
-    return it != _sessions.end() && _clock.nowUnix() <= it->second;
+    return it != _sessions.end() && !it->second.closed && _clock.nowUnix() <= it->second.expiresAt;
+}
+
+bool SessionRegistry::isClosed(const std::string& sessionId) const
+{
+    const auto it = _sessions.find(sessionId);
+    return it != _sessions.end() && it->second.closed && _clock.nowUnix() <= it->second.expiresAt;
 }
 
 void SessionRegistry::purgeExpired()
@@ -23,7 +33,7 @@ void SessionRegistry::purgeExpired()
     const std::int64_t now = _clock.nowUnix();
     for (auto it = _sessions.begin(); it != _sessions.end();)
     {
-        if (now > it->second)
+        if (now > it->second.expiresAt)
             it = _sessions.erase(it);
         else
             ++it;

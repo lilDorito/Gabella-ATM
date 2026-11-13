@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "Check.h"
@@ -51,7 +52,8 @@ struct AuthRig
     AccountRepository accounts{ r.db };
     TxRepository txs{ r.db };
     HookSink sink{ r.log };
-    AuthorizationService service{ *r.fx.bank, r.db, r.atms, cards, accounts, txs, sink, r.clock, r.config };
+    SessionRegistry sessions{ r.clock };
+    AuthorizationService service{ *r.fx.bank, r.db, r.atms, cards, accounts, txs, sessions, sink, r.clock, r.config };
     BankServer server{ *r.fx.bank, r.log, r.gate, r.atms, r.checkpointService, ServerParts{ service, r.unavailable, r.unavailable, r.unavailable, r.unavailable } };
     PinModule pinModule{ *r.fx.atm };
 
@@ -77,6 +79,12 @@ struct AuthRig
     AuthResponse ask(Action action, std::int64_t amountKop, const std::string& pin = kPin, const std::string& pan = kPan) { return server.authorize(request(action, amountKop, pin, pan)); }
 
     std::int64_t balance(const std::string& accountId = "ACC-1") { return *accounts.balance(accountId) - txs.reservedTotal(accountId); }
+
+    void settle()
+    {
+        for (const TxRecord& tx : txs.findOpenByAtm(kRigAtm))
+            if (!accounts.debit(tx.accountId, tx.amountKop) || !txs.setStatus(tx.id, TxStatus::Committed, r.clock.nowUnix(), "test", "settled")) throw std::runtime_error("test: settle failed");
+    }
     std::uint32_t attempts(const std::string& pan = kPan) { return cards.find(pan)->failedPinAttempts; }
     std::uint64_t lastSeq(const std::string& atmId = kRigAtm) { return r.atms.find(atmId)->lastDispenseSeq; }
     bool takeSequence(std::uint64_t expected)
@@ -131,6 +139,10 @@ void balanceAndWithdrawalTests()
     check(a.lastSeq() == 1, "the ATM's dispense sequence moved on");
     check(a.openIntents() == 0 && a.r.count(EventType::AUTH_DECISION) == 3, "the withdrawal is logged as an intent and a result, and none is left open");
 
+    const AuthResponse early = a.ask(Action::Withdraw, uah(200));
+    check(early.status == AuthStatus::Declined && !early.command && a.lastSeq() == 1, "no new withdrawal while this ATM's last one is unsettled");
+    check(a.ask(Action::CheckBalance, 0).status == AuthStatus::Approved, "a balance check is still answered");
+    a.settle();
     const AuthResponse second = a.ask(Action::Withdraw, uah(200));
     check(second.command && second.command->sequence == 2 && a.lastSeq() == 2, "the next withdrawal gets the next sequence");
     check(a.balance() == uah(50000) - uah(700), "and the balance follows");
@@ -173,11 +185,14 @@ void limitTests()
     check(a.attempts() == 0, "and a right PIN is not punished");
 
     check(a.ask(Action::Withdraw, uah(10000)).status == AuthStatus::Approved, "the per-withdrawal limit itself is allowed");
+    a.settle();
     check(a.ask(Action::Withdraw, uah(10000)).status == AuthStatus::Approved, "a second one reaches the daily limit");
+    a.settle();
     check(a.ask(Action::Withdraw, uah(100)).status == AuthStatus::LimitExceeded, "nothing more fits into the daily limit");
     a.r.clock.advance(24 * 60 * 60 + 1);
     const AuthResponse nextDay = a.ask(Action::Withdraw, uah(100));
     check(nextDay.status == AuthStatus::Approved && nextDay.command && nextDay.command->sequence == 3, "a day later the limit has room again");
+    a.settle();
 
     a.addCard("5432109876543210", "ACC-2", uah(300), 12, 2030, "4321");
     const AuthResponse poor = a.ask(Action::Withdraw, uah(500), "4321", "5432109876543210");
@@ -191,8 +206,9 @@ void limitTests()
         Statement s(reversed.r.db, "UPDATE transactions SET status = 'REVERSED' WHERE dispense_seq = 1");
         s.run();
     }
-    check(reversed.ask(Action::Withdraw, uah(10000)).status == AuthStatus::Approved && reversed.ask(Action::Withdraw, uah(10000)).status == AuthStatus::Approved,
-        "a reversed withdrawal does not count against the daily limit");
+    const bool firstAgain = reversed.ask(Action::Withdraw, uah(10000)).status == AuthStatus::Approved;
+    reversed.settle();
+    check(firstAgain && reversed.ask(Action::Withdraw, uah(10000)).status == AuthStatus::Approved, "a reversed withdrawal does not count against the daily limit");
 }
 
 void refusalTests()

@@ -17,8 +17,6 @@ constexpr const char* kEnqueuePrefix = "cmd/";
 constexpr const char* kResultPrefix = "cmdres/";
 constexpr const char* kExpiryPrefix = "cmdexp/";
 
-// SignedCommand carries expiresAt when the signed payload includes it. Writing it through a trait keeps
-// this file compiling either way and puts the same value into the stored row and the signature.
 template <typename T, typename = void>
 struct HasExpiresAt : std::false_type
 {
@@ -45,7 +43,6 @@ std::optional<KeyType> keyTypeFromName(const std::string& name)
     return std::nullopt;
 }
 
-// params of a stored UpdateWorkingKey command are "<type>|<blob>".
 std::optional<KeyType> keyTypeOf(const CommandRecord& command)
 {
     if (command.action != Action::UpdateWorkingKey) return std::nullopt;
@@ -169,8 +166,6 @@ EnqueueResult CommandService::enqueueApproved(const std::string& requestId)
         std::string params;
         if (keyType)
         {
-            // The new key is created inside the HSM and leaves it only encrypted. The bank keeps it pending
-            // until the ATM confirms that it has switched.
             const auto blob = _hsm.prepareWorkingKey(target->atmId, *keyType);
             if (!blob) return closeEnqueue(intent, EnqueueResult::KeyUnavailable, where + " reason=key_unavailable");
             params = keyName + "|" + *blob;
@@ -247,7 +242,6 @@ bool CommandService::reportCommandResult(const std::string& atmId, std::uint64_t
     const auto command = _commands.find(atmId, commandSeq);
     if (!command || command->status != CommandStatus::Queued)
     {
-        // Unknown or already reported: a replayed or invented result changes nothing.
         (void)recordBestEffort(_log, commandEvent(EventType::ACCESS_DENIED, Outcome::Failure, atmId, "call=CommandResult reason=unknown_command seq=" + std::to_string(commandSeq)));
         return false;
     }
@@ -282,7 +276,6 @@ bool CommandService::reportCommandResult(const std::string& atmId, std::uint64_t
         return false;
     }
 
-    // The HSM key and the request status are not part of the SQL transaction; they follow the stored result.
     std::string notes;
     bool clean = true;
     if (const auto keyType = keyTypeOf(*command))

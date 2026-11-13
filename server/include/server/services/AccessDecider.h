@@ -5,9 +5,6 @@
 #include "audit/IAuditSink.h"
 #include "server/repo/AtmRepository.h"
 
-// The server's answer to "may this token do this action on this ATM". Identity, role and dual control
-// are AccessControl's job; this class adds what only the server knows: the ATM exists and is in service,
-// and a critical request is bound to the ATM that asked for it.
 class AccessDecider final : public IAccessDecider
 {
 private:

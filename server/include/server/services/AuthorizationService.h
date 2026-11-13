@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 
+#include "access/SessionRegistry.h"
 #include "audit/IAuditSink.h"
 #include "audit/IntentRecovery.h"
 #include "common/Clock.h"
@@ -32,6 +33,7 @@ private:
     CardRepository& _cards;
     AccountRepository& _accounts;
     TxRepository& _transactions;
+    SessionRegistry& _sessions;
     IAuditSink& _log;
     const IClock& _clock;
     const SystemConfig& _config;
@@ -47,7 +49,7 @@ private:
     AuthResponse withdraw(const AuthRequest& request);
     Reservation reserve(const AuthRequest& request, const DispenseCommand& command, std::int64_t now);
     std::optional<std::int64_t> availableKop(const std::string& accountId) const;
-    std::optional<AuthStatus> withdrawalRefusal(const CardRecord& card, std::int64_t amountKop, std::int64_t now, std::string& reason) const;
+    std::optional<AuthStatus> withdrawalRefusal(const std::string& atmId, const CardRecord& card, std::int64_t amountKop, std::int64_t now, std::string& reason) const;
 
 public:
     AuthorizationService(const BankHsm& hsm,
@@ -56,6 +58,7 @@ public:
         CardRepository& cards,
         AccountRepository& accounts,
         TxRepository& transactions,
+        SessionRegistry& sessions,
         IAuditSink& log,
         const IClock& clock,
         const SystemConfig& config);

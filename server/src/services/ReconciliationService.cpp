@@ -77,7 +77,7 @@ EventType eventFor(TxStatus status)
     }
 }
 
-LogEvent txEvent(EventType type, Outcome outcome, const TxRecord& tx, const std::string& reason)
+LogEvent txEvent(EventType type, Outcome outcome, const TxRecord& tx, const std::string& reason, const std::string& by = kBy)
 {
     LogEvent e;
     e.type = type;
@@ -86,7 +86,7 @@ LogEvent txEvent(EventType type, Outcome outcome, const TxRecord& tx, const std:
     e.actorRole = Role::System;
     e.actorId = tx.atmId;
     e.amount = Money::fromKop(tx.amountKop);
-    e.details = "tx=" + std::to_string(tx.id) + " seq=" + std::to_string(tx.dispenseSeq) + " by=" + kBy + " reason=" + reason;
+    e.details = "tx=" + std::to_string(tx.id) + " seq=" + std::to_string(tx.dispenseSeq) + " by=" + by + " reason=" + reason;
     return e;
 }
 
@@ -142,6 +142,20 @@ std::optional<IntentTarget> parseOpId(const std::string& opId)
 }
 }
 
+const char* manualResultToString(ManualResult result)
+{
+    switch (result)
+    {
+    case ManualResult::Resolved: return "Resolved";
+    case ManualResult::AlreadyResolved: return "AlreadyResolved";
+    case ManualResult::UnknownTransaction: return "UnknownTransaction";
+    case ManualResult::NotDisputed: return "NotDisputed";
+    case ManualResult::TooEarly: return "TooEarly";
+    case ManualResult::Failed: return "Failed";
+    }
+    return "";
+}
+
 ReconciliationService::ReconciliationService(Database& db,
     TxRepository& txs,
     AccountRepository& accounts,
@@ -182,9 +196,9 @@ void ReconciliationService::noteMismatch(const std::string& atmId, const char* c
             std::string("reason=cassette_mismatch call=") + call + " expected_value=" + std::to_string(valueOf(expected)) + " reported_value=" + std::to_string(valueOf(reported))));
 }
 
-bool ReconciliationService::settle(const TxRecord& tx, TxStatus to, const std::string& reason, const std::map<int, int>* newExpected)
+bool ReconciliationService::settle(const TxRecord& tx, TxStatus to, const std::string& reason, const std::map<int, int>* newExpected, const std::string& by)
 {
-    LogEvent intent = txEvent(eventFor(to), Outcome::Info, tx, reason);
+    LogEvent intent = txEvent(eventFor(to), Outcome::Info, tx, reason, by);
     intent.opId = opIdFor(tx.id, to);
     if (!_log.record(intent)) return false;
 
@@ -193,7 +207,7 @@ bool ReconciliationService::settle(const TxRecord& tx, TxStatus to, const std::s
     try
     {
         Transaction dbtx(_db);
-        ok = _txs.setStatus(tx.id, to, _clock.nowUnix(), kBy, reason);
+        ok = _txs.setStatus(tx.id, to, _clock.nowUnix(), by, reason);
         if (ok && to == TxStatus::Committed) ok = _accounts.debit(tx.accountId, tx.amountKop);
         if (ok && newExpected) _cassettes.replace(tx.atmId, normalised(*newExpected));
         if (ok) dbtx.commit();
@@ -231,6 +245,20 @@ std::size_t ReconciliationService::tick()
 }
 
 bool ReconciliationService::hasUnresolved(const std::string& atmId) const { return !_txs.findOpenByAtm(atmId).empty(); }
+
+std::vector<TxRecord> ReconciliationService::disputed() const { return _txs.findUncertainOlderThan(_clock.nowUnix() - _config.manualResolutionAfterSeconds); }
+
+ManualResult ReconciliationService::resolveManually(std::int64_t txId, bool commit, const std::string& by, const std::string& reason)
+{
+    const auto tx = _txs.findById(txId);
+    if (!tx) return ManualResult::UnknownTransaction;
+    const TxStatus to = commit ? TxStatus::Committed : TxStatus::Reversed;
+    if (tx->status == to && tx->resolvedBy == by) return ManualResult::AlreadyResolved;
+    if (tx->status != TxStatus::Uncertain) return ManualResult::NotDisputed;
+    if (_clock.nowUnix() < tx->createdAt + _config.manualResolutionAfterSeconds) return ManualResult::TooEarly;
+    if (reason.empty() || by.empty()) return ManualResult::Failed;
+    return settle(*tx, to, reason, nullptr, by) ? ManualResult::Resolved : ManualResult::Failed;
+}
 
 bool ReconciliationService::onDispenseReport(const DispenseReport& report)
 {

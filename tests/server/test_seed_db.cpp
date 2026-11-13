@@ -75,7 +75,8 @@ void usableTests()
     CardRepository cards(r.db);
     AccountRepository accounts(r.db);
     TxRepository txs(r.db);
-    AuthorizationService service(*r.fx.bank, r.db, r.atms, cards, accounts, txs, r.log, r.clock, r.config);
+    SessionRegistry sessions(r.clock);
+    AuthorizationService service(*r.fx.bank, r.db, r.atms, cards, accounts, txs, sessions, r.log, r.clock, r.config);
     BankServer server(*r.fx.bank, r.log, r.gate, r.atms, r.checkpointService, ServerParts{ service, r.unavailable, r.unavailable, r.unavailable, r.unavailable });
     PinModule pinModule(*r.fx.atm);
 
@@ -86,6 +87,7 @@ void usableTests()
     const AuthResponse rich = ask(all[0], all[0].pin, Action::Withdraw, 50000);
     check(rich.status == AuthStatus::Approved && rich.command, "the normal card withdraws with its PIN");
     check(ask(all[0], all[0].pin, Action::CheckBalance, 0).balance->kop() == all[0].balanceKop - 50000, "and its balance shows the withdrawal");
+    for (const TxRecord& tx : txs.findOpenByAtm(kRigAtm)) (void)txs.setStatus(tx.id, TxStatus::Committed, r.clock.nowUnix(), "test", "settled");
     check(ask(all[1], all[1].pin, Action::Withdraw, 50000).status == AuthStatus::InsufficientFunds, "the low-balance card runs out of money");
     check(ask(all[2], all[2].pin, Action::Withdraw, 10000).status == AuthStatus::CardBlocked, "the blocked card is blocked");
     check(ask(all[3], all[3].pin, Action::Withdraw, 10000).status == AuthStatus::Declined, "the expired card is declined");

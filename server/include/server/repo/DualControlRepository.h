@@ -8,8 +8,6 @@
 #include "access/IDualControlRepository.h"
 #include "server/db/Database.h"
 
-// SQLite implementation of the module-4 interface. Requests and approvals live in
-// dual_control_requests / dual_control_approvals; the schema triggers keep status moving forward only.
 class DualControlRepository final : public IDualControlRepository
 {
 private:
@@ -33,6 +31,5 @@ public:
     [[nodiscard]] std::vector<CriticalRequest> listPending() const override;
     [[nodiscard]] bool inTransaction(const std::function<bool()>& fn) override;
 
-    // Not part of the module-4 interface: used by CommandService to find approvals that were never queued.
     [[nodiscard]] std::vector<CriticalRequest> listApproved() const;
 };

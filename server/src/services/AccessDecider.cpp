@@ -33,8 +33,6 @@ Decision AccessDecider::decide(const AccessRequest& request)
         AccessRequest bound = request;
         if (_policy.isCritical(request.action))
         {
-            // The ATM that asks is the ATM the approved command will be addressed to; whatever the
-            // ATM put into params only becomes the extra part and cannot name another machine.
             const auto params = makeCommandParams(request.atmId, request.params);
             if (!params) return deny(DenyReason::NotPermitted, request);
             bound.params = *params;
@@ -43,7 +41,6 @@ Decision AccessDecider::decide(const AccessRequest& request)
     }
     catch (const std::exception&)
     {
-        // Fail closed: a storage fault is a "no", never an "allowed".
         return deny(DenyReason::NotPermitted, request);
     }
 }

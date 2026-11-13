@@ -8,8 +8,6 @@
 #include "crypto/BankHsm.h"
 #include "server/services/ServerServices.h"
 
-// Staff login and logout as the BankServer sees them: open the sealed password, let StaffAuthService check
-// it (SqliteStaffAuthenticator does the hash and the lockout) and issue the token, wipe the password.
 class StaffService final : public IStaffService
 {
 private:

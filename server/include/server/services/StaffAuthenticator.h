@@ -11,8 +11,6 @@
 #include "server/repo/StaffRepository.h"
 #include "server/services/PasswordVerifier.h"
 
-// Password check and lockout against the staff table (the SQLite counterpart of
-// InMemoryStaffAuthenticator). AccessControl calls verify() and issues the token.
 class SqliteStaffAuthenticator final : public IStaffAuthenticator, public IIntentResolver
 {
 private:

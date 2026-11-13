@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #include "Check.h"
@@ -546,6 +547,60 @@ void consoleTests()
         "a scripted session creates a request and lists it");
 }
 
+std::int64_t addDispute(StaffRig& r, std::int64_t seq, std::int64_t ageSeconds)
+{
+    if (!r.accounts.find("ACC-1")) r.accounts.insert(AccountRecord{ "ACC-1", "Owner", 1000000 });
+    const std::int64_t id = r.txs.insertHeld(kAtmA, "S-" + std::to_string(seq), "ACC-1", 50000, static_cast<std::uint64_t>(seq), r.clock.nowUnix() - ageSeconds);
+    if (!r.txs.setStatus(id, TxStatus::Uncertain, r.clock.nowUnix(), "reconciliation", "no_report_in_time")) throw std::runtime_error("test: cannot make a dispute");
+    return id;
+}
+
+void disputeTests()
+{
+    section("Disputed transactions");
+
+    StaffRig r;
+    const std::int64_t day = r.config.manualResolutionAfterSeconds;
+    const std::int64_t old = addDispute(r, 1, day + 60);
+    const std::int64_t fresh = addDispute(r, 2, 60);
+    const std::string a1 = r.consoleToken("A-01");
+    const std::string a2 = r.consoleToken("A-02");
+
+    const auto list = r.console.disputes(a1);
+    check(list.size() == 1 && list.front().id == old, "only transactions uncertain for more than 24 hours are listed");
+    check(r.console.disputes("").empty(), "nobody else sees them");
+    check(r.console.proposeResolution(a1, fresh, false, "too_early").verdict == Verdict::Denied, "a younger one cannot be resolved by hand yet");
+    check(r.console.proposeResolution(a1, old, false, "has spaces").verdict == Verdict::Denied, "the reason is a single word");
+
+    const Decision d = r.console.proposeResolution(a1, old, false, "cassette_jam_confirmed_on_site");
+    check(d.verdict == Verdict::PendingApproval, "an admin proposes a reversal with a reason");
+    check(r.txs.findById(old)->status == TxStatus::Uncertain, "nothing changes on one admin's word");
+    check(r.console.approve(a1, d.requestId).result == ApprovalResult::AlreadyApproved, "the same admin cannot approve it");
+
+    const ConsoleApproval second = r.console.approve(a2, d.requestId);
+    check(second.result == ApprovalResult::Approved && second.resolved == ResolveResult::Resolved && !second.queued, "a second admin's approval resolves it on the server");
+    const auto tx = r.txs.findById(old);
+    check(tx && tx->status == TxStatus::Reversed && tx->resolvedBy == DisputeService::resolvedBy(d.requestId) && tx->reason == "cassette_jam_confirmed_on_site",
+        "it is reversed, with who decided and why");
+    check(r.accounts.balance("ACC-1") == 1000000, "a reversal takes no money");
+    check(r.dual.get(d.requestId)->status == RequestStatus::Executed, "the request is executed");
+    check(r.disputes.executeApproved(d.requestId) == ResolveResult::AlreadyResolved, "and cannot run twice");
+    check(r.console.disputes(a1).empty(), "the dispute leaves the list");
+
+    StaffRig c;
+    const std::int64_t paid = addDispute(c, 1, day + 60);
+    const Decision commit = c.console.proposeResolution(c.consoleToken("A-01"), paid, true, "counted_at_collection");
+    check(c.console.approve(c.consoleToken("A-02"), commit.requestId).resolved == ResolveResult::Resolved, "a commit is resolved the same way");
+    check(c.txs.findById(paid)->status == TxStatus::Committed && c.accounts.balance("ACC-1") == 1000000 - 50000, "and the money is debited once");
+
+    StaffRig crash;
+    const std::int64_t lost = addDispute(crash, 1, day + 60);
+    const Decision open = crash.console.proposeResolution(crash.consoleToken("A-01"), lost, false, "jam");
+    check(crash.approvals.approve(open.requestId, crash.consoleToken("A-02")) == ApprovalResult::Approved, "an approval lands but the server stops before acting on it");
+    check(crash.txs.findById(lost)->status == TxStatus::Uncertain, "the transaction is still open");
+    check(crash.disputes.tick() == 1 && crash.txs.findById(lost)->status == TxStatus::Reversed, "the next tick finishes it");
+}
+
 void argon2Tests()
 {
     section("Argon2id verifier");
@@ -571,6 +626,7 @@ int main()
     dualControlRepositoryTests();
     commandTests();
     consoleTests();
+    disputeTests();
     argon2Tests();
     return gabella_test::summary();
 }

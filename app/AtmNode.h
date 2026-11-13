@@ -75,7 +75,8 @@ struct AtmNode
         const std::map<int, int>& cassettes,
         const std::filesystem::path& dataDir,
         std::uint32_t checkpointInterval,
-        bool scripted)
+        bool scripted,
+        term::Style style = {})
         : atmId(std::move(id)),
           clock(clockRef),
           hsm(signPublic, boxPublic),
@@ -85,6 +86,7 @@ struct AtmNode
           logAnchors(dataDir / "logs" / (atmId + ".anchor")),
           log(atmId, logStorage, logAnchors, logSigner, link, clock, checkpointInterval),
           input(scripted),
+          display(std::cout, style),
           dispenseSeq(dataDir / (atmId + ".dispense-seq")),
           commandSeq(dataDir / (atmId + ".command-seq")),
           dispenser(atmId, hsm, clock, dispenseSeq, cassettes)
